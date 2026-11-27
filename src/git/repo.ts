@@ -58,3 +58,12 @@ export async function objectAt(repo: Repo, rev: string, path: string): Promise<s
 export async function isShallow(repo: Repo): Promise<boolean> {
   return (await runGit(["rev-parse", "--is-shallow-repository"], { cwd: repo.root })).stdout.trim() === "true";
 }
+
+/** Whether git would ignore `path` (repo-relative) if it were untracked. */
+export async function isIgnored(repo: Repo, path: string): Promise<boolean> {
+  const { exitCode } = await runGit(["check-ignore", "-q", "--no-index", "--", path], {
+    cwd: repo.root,
+    okExitCodes: [1],
+  });
+  return exitCode === 0;
+}

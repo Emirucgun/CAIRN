@@ -80,6 +80,17 @@ describe("snapshot", () => {
     expect(() => r.git("cat-file", "-e", r.git("hash-object", "id_ed25519").trim())).toThrow();
   });
 
+  it("works when .cairn/ and denied files are gitignored, as after cairn init", async () => {
+    const r = init(makeRepo({ ".gitignore": ".cairn/\n.env\nid_rsa\nsecrets.json\n", "a.ts": "a\n" }));
+    r.write(".env", "X=1\n");
+    r.write("id_rsa", "k\n");
+    r.write("secrets.json", "{}\n");
+    r.write(".cairn/cache/ab/cd.json", "{}");
+    r.write(".cairnignore", "\n");
+    const s = await snapshot(await openRepo(r.dir));
+    expect(files(r, s.tree)).toEqual([".cairnignore", ".gitignore", "a.ts"]);
+  });
+
   it("keeps files that are tracked even though .gitignore matches them, like git does", async () => {
     const r = init(makeRepo({ "build/keep.js": "tracked\n" }));
     r.write(".gitignore", "build/\n");

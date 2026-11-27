@@ -16,10 +16,14 @@ export const BUILTIN_DENIES: readonly string[] = [".env*", "*.pem", "*.key", "*.
  * The same denies as git pathspec globs, passed to `git add` as excludes so
  * matching untracked files are never hashed into .git/objects. `.cairn/` is
  * always excluded, even before `cairn init` adds it to .gitignore.
+ *
+ * Every glob must contain a wildcard: `git add` rejects a pathspec that
+ * names a gitignored path literally ("paths are ignored"), even as an
+ * exclude. Hence `[.]cairn/**` rather than `.cairn/**`.
  */
 export const BUILTIN_DENY_GLOBS: readonly string[] = [
   ...BUILTIN_DENIES.map((p) => `**/${p}`),
-  `${CAIRN_DIR}/**`,
+  `[.]${CAIRN_DIR.slice(1)}/**`,
 ];
 
 /** 1 MiB. Larger files stay in the snapshot but get no skeleton. */
