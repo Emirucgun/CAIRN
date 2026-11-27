@@ -1,5 +1,6 @@
 // Everything a command needs from its environment, injectable for tests.
 import { createInterface } from "node:readline/promises";
+import type { Summarizer } from "../summarizers/index.js";
 
 /** Only an explicit yes counts (SPEC: consent is never assumed). */
 export function isYes(answer: string): boolean {
@@ -14,6 +15,8 @@ export interface Io {
   interactive?: boolean;
   /** Asks a yes/no question on stderr; true only for an explicit y/yes. */
   ask?(question: string): Promise<boolean>;
+  /** Tests only: replaces the configured summarizer (e.g. with FakeSummarizer). */
+  summarizerFactory?: () => Summarizer;
   env: NodeJS.ProcessEnv;
   out(text: string): void;
   err(text: string): void;

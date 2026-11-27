@@ -162,6 +162,8 @@ export const Config = z.strictObject({
       price_output_per_mtok: z.number().nonnegative().optional(),
       max_calls_per_run: z.number().int().positive().default(200),
       concurrency: z.number().int().positive().default(4),
+      /** Lines of source sent with a file's skeleton (SPEC §Algorithm 2 step 4). */
+      source_lines: z.number().int().positive().max(2000).default(200),
     })
     .superRefine((v, ctx) => {
       if (v.provider !== "off" && !v.model) {

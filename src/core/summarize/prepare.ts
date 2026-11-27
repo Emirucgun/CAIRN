@@ -76,7 +76,9 @@ export function describePlan(plan: Plan, summarizer: Summarizer, est: Estimate, 
     lines.push(
       est.price && est.costUsd !== null
         ? `  Estimated cost: ~${formatUsd(est.costUsd)} (${est.price.source === "built-in" ? `built-in prices from ${PRICE_TABLE_DATE}; may be out of date` : "prices from config.toml"})`
-        : "  Estimated cost: unknown (set price_input_per_mtok and price_output_per_mtok in [summarizer])",
+        : !summarizer.external
+          ? "  Estimated cost: none (local model)"
+          : "  Estimated cost: unknown (set price_input_per_mtok and price_output_per_mtok in [summarizer])",
     );
   }
   if (est.calls > cap) lines.push(`  Over the call cap of ${cap}: the run will be refused (narrow the path, or pass --max-calls ${est.calls}).`);
