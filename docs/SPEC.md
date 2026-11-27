@@ -170,6 +170,8 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
 
 `imports` holds raw import specifiers exactly as written in the source. Entries are keyed by content, not path, so resolving specifiers to repo paths happens when a command reads the entry, using the path it is being read for. `tokens.source` is a fast `chars / 4` estimate; `tokens.skeleton` and `tokens.summary`, and every count of text CAIRN serves, use `js-tiktoken`.
 
+Fields that don't apply to an entry are `null`, never omitted. A `skeleton`-layer entry has `summary: null` and `tokens.summary: null`; a `summary`-layer entry carries the skeleton it was built from. For `tree` entries, `tokens.source` is the sum over its children.
+
 For `tree` entries, `skeleton` is null and `children` lists `{ "name", "kind", "hash" }` for each child, so a folder summary can be traced to exactly the child content it was built from.
 
 ### Session cursor
@@ -186,6 +188,8 @@ For `tree` entries, `skeleton` is null and `children` lists `{ "name", "kind", "
   "active_task": "rec_01JDX…"
 }
 ```
+
+`last_head` is `null` in a repo with no commits, and `active_task` is `null` when no task is active. The agent id becomes a file name, so it must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
 
 ### Records (why-notes and lifecycle)
 

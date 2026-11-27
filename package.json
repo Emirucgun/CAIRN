@@ -40,8 +40,10 @@
   "dependencies": {
     "commander": "^15.1.0",
     "execa": "^10.2.1",
+    "smol-toml": "^1.9.1",
     "tree-sitter-wasms": "0.1.13",
-    "web-tree-sitter": "0.25.10"
+    "web-tree-sitter": "0.25.10",
+    "zod": "^4.6.7"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
