@@ -1,6 +1,7 @@
 import type { Node } from "web-tree-sitter";
 import type { Extracted } from "./common.js";
 import { createParser, type Lang } from "./loader.js";
+import { extractDart } from "./dart.js";
 import { extractPython } from "./python.js";
 import { extractTypeScript } from "./typescript.js";
 
@@ -17,6 +18,7 @@ const EXTRACTORS: Partial<Record<Lang, Extractor>> = {
   tsx: extractTypeScript,
   javascript: extractTypeScript,
   python: extractPython,
+  dart: extractDart,
 };
 
 export function isSupported(lang: Lang): boolean {
