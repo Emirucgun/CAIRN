@@ -143,14 +143,14 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
 - `object_kind`: `blob` (file) or `tree` (folder).
 - `git_object_hash`: the hash git itself assigns (`git rev-parse <rev>:<path>`, or from a snapshot tree).
 - `layer`: `skeleton` or `summary`.
-- `generator_id`: for skeletons `ts:<lang>@<grammar-pkg-version>+x<extractor-version>` (e.g. `ts:typescript@0.1.13+x1`), so a grammar or extraction-query change, or the same bytes parsed as a different language, gets a new key; for summaries `<provider>/<model>@p<prompt-version>`.
+- `generator_id`: for file skeletons `ts:<lang>@<grammar-pkg-version>+x<extractor-version>` (e.g. `ts:typescript@0.1.13+x1`), so a grammar or extraction-query change, or the same bytes parsed as a different language, gets a new key; for folder skeletons `ts-dir@<grammar-pkg-version>+x<extractor-version>`; for summaries `<provider>/<model>@p<prompt-version>`.
 - Stored at `.cairn/cache/<key[0:2]>/<key[2:]>.json`. Same content at two paths shares one entry.
 
 ### Cache entry
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "key": "5e1b…",
   "object": { "kind": "blob", "hash": "9f2c4e…" },
   "layer": "summary",
@@ -162,6 +162,7 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
   "imports": ["../lib/supabase"],
   "summary": "Creates and refreshes user sessions via Supabase auth. Throws AuthError on invalid credentials.",
   "children": null,
+  "files": null,
   "tokens": { "source": 4210, "skeleton": 180, "summary": 45 },
   "generator": "ollama/qwen2.5-coder:7b@p3",
   "created": "2026-11-27T08:20:00Z"
@@ -173,6 +174,20 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
 Fields that don't apply to an entry are `null`, never omitted. A `skeleton`-layer entry has `summary: null` and `tokens.summary: null`; a `summary`-layer entry carries the skeleton it was built from. For `tree` entries, `tokens.source` is the sum over its children.
 
 For `tree` entries, `skeleton` is null and `children` lists `{ "name", "kind", "hash" }` for each child, so a folder summary can be traced to exactly the child content it was built from.
+
+**Folder skeletons** (schema 2). A `tree`-layer `skeleton` entry holds the skeletons of the folder's *direct* files, so `cairn map` reads one entry per folder it shows instead of one per file (on a 10,000-file repo, ~350 reads instead of 9,000; per-file reads cost ~2 s on CI macOS). It is keyed by the folder's tree hash with generator `ts-dir@…`, lists `children` as above, and has `files`: one item per direct file in a supported language, sorted by name. Subfolders are not included; they have their own entries.
+
+```json
+"files": [
+  { "name": "session.ts", "hash": "9f2c4e…", "lang": "typescript",
+    "skeleton": [ … ], "imports": ["../lib/supabase"],
+    "tokens": { "source": 4210, "skeleton": 180 }, "skipped": null }
+]
+```
+
+`skipped` is `"too-large"`, `"binary"` or `"secret"` when a file gets no skeleton (then `skeleton` and `imports` are null); the matched text of a secret is never stored. `files` is `null` on every other entry. A change anywhere below a folder changes its tree hash, so an edit rebuilds the entries of the edited file's folder and its ancestors; files in those folders are re-parsed unless a per-file entry for their blob exists. Per-file (`blob`) entries remain for `cairn read` and `cairn context`.
+
+Schema 1 entries are migrated on read by adding `files: null`.
 
 ### Session cursor
 

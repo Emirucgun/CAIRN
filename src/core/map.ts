@@ -2,7 +2,8 @@
 // symbols of each file, from the working-tree snapshot. No LLM involved;
 // summaries are added in v0.2.
 import { lsTree, type TreeEntry } from "../git/index.js";
-import { buildAndStore, type SkeletonDeps, type SkeletonResult, type SkipReason, skeletonFor } from "./skeleton/index.js";
+import { extractSkeleton } from "./skeleton/extract.js";
+import { folderSkeleton, type SkeletonDeps, type SkipReason, skeletonFor } from "./skeleton/index.js";
 import { ParsePool } from "./skeleton/pool.js";
 import { snapshot } from "./snapshot.js";
 import type { SkeletonSymbol } from "./types.js";
@@ -25,13 +26,17 @@ export interface SnapshotListing {
   tree: string;
   /** Every blob in the tree (ls-tree -r). */
   blobs: TreeEntry[];
+  /** Tree hash of every folder, by repo-relative path. */
+  trees: Map<string, string>;
 }
 
 /** Takes a snapshot and lists its blobs, for commands that need both. */
 export async function snapshotListing(ws: Workspace): Promise<SnapshotListing & { head: string | null }> {
   const snap = await snapshot(ws.repo, { paths: ws.paths });
-  const blobs = (await lsTree(ws.repo, snap.tree, { recursive: true })).filter((e) => e.type === "blob");
-  return { tree: snap.tree, head: snap.head, blobs };
+  const all = await lsTree(ws.repo, snap.tree, { recursive: true, includeTrees: true });
+  const blobs = all.filter((e) => e.type === "blob");
+  const trees = new Map(all.filter((e) => e.type === "tree").map((e) => [e.path, e.hash]));
+  return { tree: snap.tree, head: snap.head, blobs, trees };
 }
 
 export interface MapFile {
@@ -107,36 +112,50 @@ export async function buildMap(ws: Workspace, opts: MapOptions = {}): Promise<Ma
   const rootDir = single ? null : findDir(tree, rootPath);
   if (!single && !rootDir) throw new PathNotInSnapshotError(rootPath);
 
-  // Files whose symbols are shown: those within depth (or the single file).
-  const shown = single ? [single] : collectShown(rootDir as Dir, depth);
-  const stats = { files: shown.length, parsed: 0, cached: 0, skipped: 0, ms: 0 };
-  const results = new Map<string, SkeletonResult>();
-  // Worker threads only pay off for big batches; they start on the first cache miss.
-  // The first INLINE_PARSES misses parse inline, so an edit or two never pays
-  // for starting workers.
-  const pool = shown.length >= POOL_THRESHOLD ? new ParsePool() : null;
-  let misses = 0;
+  // Folders shown expanded; their direct files get symbols (or the single file).
+  const expanded = single ? [] : collectExpanded(rootDir as Dir, depth);
+  const shownCount = single ? 1 : expanded.reduce((n, d) => n + d.files.length, 0);
+  const stats = { files: shownCount, parsed: 0, cached: 0, skipped: 0, ms: 0 };
+  const known = new Map<string, { lang: string | null; skeleton: SkeletonSymbol[] | null; skipped: MapFile["skipped"] }>();
+
+  // Worker threads only pay off for big batches. The first INLINE_PARSES
+  // parses happen inline, so an edit or two never pays for starting workers.
+  const pool = shownCount >= POOL_THRESHOLD ? new ParsePool() : null;
+  let parses = 0;
   const deps: SkeletonDeps = pool
-    ? {
-        ...ws.skeletonDeps,
-        build: (file, lang, src, created) =>
-          ++misses <= INLINE_PARSES ? buildAndStore(ws.cache, file, lang, src, created) : pool.build(ws.cache.dir, file, lang, src, created),
-      }
+    ? { ...ws.skeletonDeps, extract: (l, src) => (++parses <= INLINE_PARSES ? extractSkeleton(l, src) : pool.extract(l, src)) }
     : ws.skeletonDeps;
   try {
-    await mapLimit(shown, pool ? 64 : 16, async (e) => {
-      const r = await skeletonFor({ path: e.path, hash: e.hash, size: e.size }, deps);
-      results.set(e.path, r);
+    if (single) {
+      const r = await skeletonFor({ path: single.path, hash: single.hash, size: single.size }, deps);
       if (r.status === "ok") stats[r.cached ? "cached" : "parsed"]++;
-      else stats.skipped++;
-    });
+      else if (r.reason !== "unsupported") stats.skipped++;
+      known.set(single.path, {
+        lang: r.status === "ok" ? r.entry.lang : null,
+        skeleton: r.status === "ok" ? r.entry.skeleton : null,
+        skipped: r.status === "skipped" && r.reason !== "unsupported" ? r.reason : null,
+      });
+    } else {
+      await mapLimit(expanded, pool ? 16 : 8, async (d) => {
+        const hash = d.path === "" ? listing.tree : listing.trees.get(d.path);
+        if (!hash) return;
+        const subtrees = [...d.dirs.values()].map((c) => ({ mode: "040000", type: "tree" as const, hash: listing.trees.get(c.path) ?? "", path: c.path, size: null }));
+        const r = await folderSkeleton({ path: d.path, hash, entries: [...d.files, ...subtrees.filter((t) => t.hash)] }, deps);
+        stats.parsed += r.parsed;
+        stats.cached += r.cached ? (r.entry?.files?.length ?? 0) : r.reused;
+        for (const f of r.entry?.files ?? []) {
+          if (f.skipped) stats.skipped++;
+          known.set(d.path === "" ? f.name : `${d.path}/${f.name}`, { lang: f.lang, skeleton: f.skeleton, skipped: f.skipped });
+        }
+      });
+    }
   } finally {
     await pool?.close();
   }
 
   const fileNode = (e: TreeEntry): MapFile => {
-    const r = results.get(e.path);
-    const all = r?.status === "ok" ? (r.entry.skeleton ?? []) : [];
+    const k = known.get(e.path);
+    const all = k?.skeleton ?? [];
     const visible = opts.all ? all : all.filter((s) => s.exported);
     const symbols = visible.slice(0, maxSymbols);
     return {
@@ -144,10 +163,10 @@ export async function buildMap(ws: Workspace, opts: MapOptions = {}): Promise<Ma
       path: e.path,
       name: e.path.slice(e.path.lastIndexOf("/") + 1),
       tokens: Math.ceil((e.size ?? 0) / 4),
-      lang: r?.status === "ok" ? r.entry.lang : null,
+      lang: k?.lang ?? null,
       symbols,
       hiddenSymbols: all.length - symbols.length,
-      skipped: r?.status === "skipped" && r.reason !== "unsupported" ? r.reason : null,
+      skipped: k?.skipped ?? null,
       summary: null,
     };
   };
@@ -209,14 +228,13 @@ function findDir(root: Dir, path: string): Dir | null {
 }
 
 /**
- * Files directly inside expanded folders. The root is level 0 and always
- * expanded; a folder at level L is expanded when L < depth (the same rule
- * folderNode uses).
+ * Folders shown expanded. The root is level 0 and always expanded; a folder
+ * at level L is expanded when L < depth (the same rule folderNode uses).
  */
-function collectShown(dir: Dir, depth: number): TreeEntry[] {
-  const out: TreeEntry[] = [];
+function collectExpanded(dir: Dir, depth: number): Dir[] {
+  const out: Dir[] = [];
   const walk = (d: Dir, level: number) => {
-    out.push(...d.files);
+    out.push(d);
     for (const c of d.dirs.values()) if (level + 1 < depth) walk(c, level + 1);
   };
   walk(dir, 0);

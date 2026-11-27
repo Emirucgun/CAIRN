@@ -5,6 +5,7 @@
 //
 //   pnpm perf            # 10,000 files, fails if a target is missed
 //   pnpm perf -- 2000    # other sizes, for quick local checks
+//   CAIRN_PERF_REPORT_ONLY=1 pnpm perf   # print results, never fail (CI macOS)
 //
 // For profiling: CAIRN_PERF_PROFILE=<dir> writes a V8 CPU profile per run
 // and thread; CAIRN_PERF_KEEP=<dir> builds the fixture there and keeps it;
@@ -137,6 +138,7 @@ try {
     console.log(`${label.padEnd(20)} ${String(r.ms).padStart(6)} ms  parsed ${r.stats.parsed}, cached ${r.stats.cached}${target}`);
   }
   if (FILES !== 10_000) console.log("(targets apply to 10,000 files; this run is informational)");
+  else if (process.env.CAIRN_PERF_REPORT_ONLY) console.log(`report only: ${failed ? "some targets missed" : "all targets met"}`);
   else if (failed) process.exitCode = 1;
 } finally {
   rmSync(dir, { recursive: true, force: true });

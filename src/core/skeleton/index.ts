@@ -37,11 +37,8 @@ export type SkeletonResult =
 export interface SkeletonDeps {
   cache: Cache;
   blobs: BlobReader;
-  /**
-   * Parses, builds and stores the entry; defaults to buildAndStore inline.
-   * Large runs pass a ParsePool, whose workers also write the cache entry.
-   */
-  build?: (file: FileRef, lang: Lang, src: string, created: string) => Promise<CacheEntry>;
+  /** Where to parse; defaults to inline. Large runs pass a ParsePool's extract. */
+  extract?: (lang: Lang, src: string) => Promise<Extracted>;
   /** Called once per file skipped for a secret: SPEC §Security says log a warning, never the text. */
   onSecret?: (path: string, pattern: string, line: number) => void;
   now?: () => Date;
@@ -69,7 +66,8 @@ export async function skeletonFor(file: FileRef, deps: SkeletonDeps): Promise<Sk
 
   const src = content.toString("utf8");
   const created = (deps.now?.() ?? new Date()).toISOString();
-  const entry = deps.build ? await deps.build(file, lang, src, created) : await buildAndStore(deps.cache, file, lang, src, created);
+  const entry = makeEntry(file, lang, src, await (deps.extract ?? extractSkeleton)(lang, src), created);
+  await deps.cache.put(entry);
   return { status: "ok", entry, cached: false };
 }
 
@@ -77,7 +75,7 @@ export async function skeletonFor(file: FileRef, deps: SkeletonDeps): Promise<Sk
 export function makeEntry(file: FileRef, lang: Lang, src: string, extracted: Extracted, created: string): CacheEntry {
   const generator = skeletonGenerator(lang);
   return {
-    schema: 1,
+    schema: 2,
     key: cacheKey({ kind: "blob", hash: file.hash, layer: "skeleton", generator }),
     object: { kind: "blob", hash: file.hash },
     layer: "skeleton",
@@ -87,15 +85,11 @@ export function makeEntry(file: FileRef, lang: Lang, src: string, extracted: Ext
     imports: extracted.imports,
     summary: null,
     children: null,
+    files: null,
     tokens: { source: estimateTokens(src), skeleton: estimateTokens(renderSkeleton(extracted.skeleton)), summary: null },
     generator,
     created,
   };
 }
 
-/** Parses `src`, builds its entry and writes it to the cache. Used inline and by parse workers. */
-export async function buildAndStore(cache: Cache, file: FileRef, lang: Lang, src: string, created: string): Promise<CacheEntry> {
-  const entry = makeEntry(file, lang, src, await extractSkeleton(lang, src), created);
-  await cache.put(entry);
-  return entry;
-}
+export { folderGenerator, folderSkeleton, type FolderInput, type FolderResult } from "./folder.js";

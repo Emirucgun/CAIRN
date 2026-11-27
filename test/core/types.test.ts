@@ -29,6 +29,7 @@ describe("CacheEntry", () => {
       imports: null,
       summary: "Auth: sessions and tokens.",
       children: [{ name: "session.ts", kind: "blob", hash: HASH }],
+      files: null,
       tokens: { source: 9000, skeleton: null, summary: 12 },
     };
     expect(CacheEntry.safeParse(tree).success).toBe(true);
@@ -49,6 +50,13 @@ describe("CacheEntry", () => {
   it("rejects a tree entry with a skeleton", () => {
     const e = { ...skeletonEntry(TREE), object: { kind: "tree", hash: TREE }, children: [] };
     expect(CacheEntry.safeParse(e).success).toBe(false);
+  });
+
+  it("requires files on folder skeletons and forbids them elsewhere", () => {
+    const folder = { ...skeletonEntry(TREE), object: { kind: "tree", hash: TREE }, skeleton: null, imports: null, lang: null, children: [], files: [] };
+    expect(CacheEntry.safeParse(folder).success).toBe(true);
+    expect(CacheEntry.safeParse({ ...folder, files: null }).success).toBe(false);
+    expect(CacheEntry.safeParse({ ...skeletonEntry(HASH), files: [] }).success).toBe(false);
   });
 });
 

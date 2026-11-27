@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 /** Highest `schema` this build knows for each versioned JSON format. */
-export const SCHEMA = { cacheEntry: 1, sessionCursor: 1 } as const;
+export const SCHEMA = { cacheEntry: 2, sessionCursor: 1 } as const;
 
 const gitHash = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "expected a git object hash");
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/, "expected a sha256 hex digest");
@@ -56,6 +56,21 @@ export type SkeletonSymbol = z.infer<typeof SkeletonSymbol>;
 export const TreeChild = z.object({ name: z.string().min(1), kind: ObjectKind, hash: gitHash });
 export type TreeChild = z.infer<typeof TreeChild>;
 
+export const SKIP_REASONS = ["too-large", "binary", "secret"] as const;
+
+/** One direct file in a folder skeleton entry (schema 2). */
+export const FolderFile = z.object({
+  name: z.string().min(1),
+  hash: gitHash,
+  lang: z.string(),
+  skeleton: z.array(SkeletonSymbol).nullable(),
+  imports: z.array(z.string()).nullable(),
+  tokens: z.object({ source: count, skeleton: count.nullable() }),
+  /** Why the file has no skeleton; the matched text of a secret is never stored. */
+  skipped: z.enum(SKIP_REASONS).nullable(),
+});
+export type FolderFile = z.infer<typeof FolderFile>;
+
 export const CacheEntry = z
   .object({
     schema: z.literal(SCHEMA.cacheEntry),
@@ -69,6 +84,8 @@ export const CacheEntry = z
     imports: z.array(z.string()).nullable(),
     summary: z.string().nullable(),
     children: z.array(TreeChild).nullable(),
+    /** Folder skeletons only: the folder's direct files (schema 2). */
+    files: z.array(FolderFile).nullable(),
     tokens: z.object({ source: count, skeleton: count.nullable(), summary: count.nullable() }),
     generator: z.string().min(1),
     created: timestamp,
@@ -80,7 +97,15 @@ export const CacheEntry = z
     if (e.object.kind === "tree" && e.children === null) issue("tree entries must list children");
     if (e.layer === "skeleton" && e.summary !== null) issue("skeleton entries must have summary: null");
     if (e.layer === "summary" && e.summary === null) issue("summary entries must have a summary");
+    const folderSkeleton = e.object.kind === "tree" && e.layer === "skeleton";
+    if (folderSkeleton && e.files === null) issue("folder skeleton entries must list files");
+    if (!folderSkeleton && e.files !== null) issue("only folder skeleton entries have files");
   });
+
+/** Cache entry migrations: schema 1 had no `files` field. */
+export const CACHE_ENTRY_MIGRATIONS = {
+  1: (d: Record<string, unknown>) => ({ ...d, files: null }),
+};
 export type CacheEntry = z.infer<typeof CacheEntry>;
 
 // ------------------------------------------------------------- session cursor

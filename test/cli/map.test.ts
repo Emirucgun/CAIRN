@@ -123,7 +123,9 @@ describe("cairn map", () => {
     expect(second.stats).toMatchObject({ parsed: 0, cached: 5 });
     expect(second.tree).toBe(first.tree);
     r.write("src/auth/tokens.ts", "export const TTL = 120;\n");
-    expect((await mapJson(r.dir, "--depth", "9")).stats).toMatchObject({ parsed: 1, cached: 4 });
+    // The edit changes the tree hashes of src/auth and src, so both folder entries
+    // are rebuilt and their direct files re-parsed: session.ts, tokens.ts, index.ts.
+    expect((await mapJson(r.dir, "--depth", "9")).stats).toMatchObject({ parsed: 3, cached: 2 });
   });
 
   it("caps symbols per file", async () => {

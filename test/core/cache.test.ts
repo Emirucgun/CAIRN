@@ -72,7 +72,7 @@ describe("Cache", () => {
 
   it.each([
     ["json", "{not json"],
-    ["schema", JSON.stringify({ ...skeletonEntry(HASH), schema: 2 })],
+    ["schema", JSON.stringify({ ...skeletonEntry(HASH), schema: 3 })],
     ["invalid", JSON.stringify({ ...skeletonEntry(HASH), tokens: null })],
     ["key-mismatch", JSON.stringify(skeletonEntry("1".repeat(40)))],
   ])("deletes and reports a %s-corrupt entry, then rebuilds", async (reason, body) => {
@@ -113,6 +113,17 @@ describe("Cache", () => {
     expect(fixed.corrupt).toHaveLength(2);
     expect(existsSync(badFile) || existsSync(stray)).toBe(false);
     expect(await cache.scan()).toEqual({ ok: 2, corrupt: [] });
+  });
+
+  it("migrates a schema 1 entry on read by adding files: null", async () => {
+    const { cache, reports } = newCache();
+    const v1 = { ...skeletonEntry(HASH), schema: 1 } as Record<string, unknown>;
+    delete v1.files;
+    const file = cache.pathFor(cacheKey(parts()));
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(v1));
+    expect(await cache.get(parts())).toEqual(skeletonEntry(HASH));
+    expect(reports).toEqual([]);
   });
 
   it("scans an empty or missing cache dir", async () => {

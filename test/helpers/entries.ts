@@ -7,7 +7,7 @@ export const GEN = "ts:typescript@0.1.13+x1";
 export function skeletonEntry(hash: string, over: Partial<CacheEntry> = {}): CacheEntry {
   const generator = over.generator ?? GEN;
   return {
-    schema: 1,
+    schema: 2,
     key: cacheKey({ kind: "blob", hash, layer: "skeleton", generator }),
     object: { kind: "blob", hash },
     layer: "skeleton",
@@ -19,6 +19,7 @@ export function skeletonEntry(hash: string, over: Partial<CacheEntry> = {}): Cac
     imports: ["../lib/supabase"],
     summary: null,
     children: null,
+    files: null,
     tokens: { source: 4210, skeleton: 180, summary: null },
     generator,
     created: "2026-11-27T08:20:00Z",

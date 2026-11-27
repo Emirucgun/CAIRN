@@ -1,14 +1,12 @@
 // A small pool of parse workers for large runs (a cold `cairn map` of 10k
-// files). Each worker parses, builds and writes the cache entry, so the main
-// thread only reads blobs and dispatches. Started lazily on first use.
+// files). Started lazily on first use; small runs parse inline.
 import { availableParallelism } from "node:os";
 import { Worker } from "node:worker_threads";
-import type { CacheEntry } from "../types.js";
-import type { FileRef } from "./index.js";
+import type { Extracted } from "./common.js";
 import type { Lang } from "./loader.js";
-import type { BuildRequest } from "./worker.js";
+import type { ParseRequest } from "./worker.js";
 
-type Reply = { id: number; entry: CacheEntry } | { id: number; error: string };
+type Reply = { id: number; result: Extracted } | { id: number; error: string };
 
 interface Slot {
   worker: Worker;
@@ -18,19 +16,18 @@ interface Slot {
 export class ParsePool {
   private slots: Slot[] | null = null;
   private nextId = 0;
-  private readonly pending = new Map<number, { resolve: (r: CacheEntry) => void; reject: (e: Error) => void; slot: Slot }>();
+  private readonly pending = new Map<number, { resolve: (r: Extracted) => void; reject: (e: Error) => void; slot: Slot }>();
 
   constructor(readonly size = Math.max(1, Math.min(4, availableParallelism()))) {}
 
-  /** Parses, builds and writes the cache entry in a worker; resolves with the entry. */
-  build(cacheDir: string, file: FileRef, lang: Lang, src: string, created: string): Promise<CacheEntry> {
+  extract(lang: Lang, src: string): Promise<Extracted> {
     const slots = this.start();
     const slot = slots.reduce((a, b) => (b.busy < a.busy ? b : a));
     const id = this.nextId++;
     slot.busy++;
-    return new Promise<CacheEntry>((resolve, reject) => {
+    return new Promise<Extracted>((resolve, reject) => {
       this.pending.set(id, { resolve, reject, slot });
-      slot.worker.postMessage({ id, cacheDir, file, lang, src, created } satisfies BuildRequest);
+      slot.worker.postMessage({ id, lang, src } satisfies ParseRequest);
     });
   }
 
@@ -54,7 +51,7 @@ export class ParsePool {
         this.pending.delete(reply.id);
         p.slot.busy--;
         if ("error" in reply) p.reject(new Error(reply.error));
-        else p.resolve(reply.entry);
+        else p.resolve(reply.result);
       });
       worker.on("error", (e) => this.failSlot(slot, e));
       worker.on("exit", (code) => {

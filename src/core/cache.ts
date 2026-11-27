@@ -7,7 +7,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { CacheEntry, InvalidFormatError, type Layer, type ObjectKind, parseVersioned, SCHEMA, SchemaTooNewError } from "./types.js";
+import { CACHE_ENTRY_MIGRATIONS, CacheEntry, InvalidFormatError, type Layer, type ObjectKind, parseVersioned, SCHEMA, SchemaTooNewError } from "./types.js";
 
 export interface KeyParts {
   kind: ObjectKind;
@@ -134,7 +134,7 @@ function checkEntry(text: string, expectedKey: string): { entry: CacheEntry } | 
   }
   let entry: CacheEntry;
   try {
-    entry = parseVersioned("cache entry", CacheEntry, SCHEMA.cacheEntry, data);
+    entry = parseVersioned("cache entry", CacheEntry, SCHEMA.cacheEntry, data, CACHE_ENTRY_MIGRATIONS);
   } catch (e) {
     if (e instanceof SchemaTooNewError) return { reason: "schema", detail: e.message };
     if (e instanceof InvalidFormatError) return { reason: "invalid", detail: e.detail };
