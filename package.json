@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "commander": "^15.1.0",
+    "execa": "^10.2.1",
     "tree-sitter-wasms": "0.1.13",
     "web-tree-sitter": "0.25.10"
   },
