@@ -143,7 +143,7 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
 - `object_kind`: `blob` (file) or `tree` (folder).
 - `git_object_hash`: the hash git itself assigns (`git rev-parse <rev>:<path>`, or from a snapshot tree).
 - `layer`: `skeleton` or `summary`.
-- `generator_id`: for skeletons `ts:<grammar-version>`; for summaries `<provider>/<model>@p<prompt-version>`.
+- `generator_id`: for skeletons `ts:<lang>@<grammar-pkg-version>+x<extractor-version>` (e.g. `ts:typescript@0.1.13+x1`), so a grammar or extraction-query change, or the same bytes parsed as a different language, gets a new key; for summaries `<provider>/<model>@p<prompt-version>`.
 - Stored at `.cairn/cache/<key[0:2]>/<key[2:]>.json`. Same content at two paths shares one entry.
 
 ### Cache entry
@@ -159,7 +159,7 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
   "skeleton": [
     { "sym": "login", "kind": "function", "sig": "(email: string, pw: string) => Promise<Session>", "lines": [12, 48], "exported": true }
   ],
-  "imports": ["src/lib/supabase.ts"],
+  "imports": ["../lib/supabase"],
   "summary": "Creates and refreshes user sessions via Supabase auth. Throws AuthError on invalid credentials.",
   "children": null,
   "tokens": { "source": 4210, "skeleton": 180, "summary": 45 },
@@ -167,6 +167,8 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
   "created": "2026-11-27T08:20:00Z"
 }
 ```
+
+`imports` holds raw import specifiers exactly as written in the source. Entries are keyed by content, not path, so resolving specifiers to repo paths happens when a command reads the entry, using the path it is being read for. `tokens.source` is a fast `chars / 4` estimate; `tokens.skeleton` and `tokens.summary`, and every count of text CAIRN serves, use `js-tiktoken`.
 
 For `tree` entries, `skeleton` is null and `children` lists `{ "name", "kind", "hash" }` for each child, so a folder summary can be traced to exactly the child content it was built from.
 
@@ -320,7 +322,7 @@ The next agent's `cairn context` includes the latest handoff automatically. The 
 
 ### Identity and tokens
 
-- Agent id comes from the adapter, the `CAIRN_AGENT` env var, or `--agent`.
+- Agent id comes from `--agent`, the `CAIRN_AGENT` env var, or the adapter; with none of these it is `default`, and output includes a one-line hint to set one.
 - `author.model` is filled when the agent reports it.
 - Budgets are converted per model with a factor table in config (default 1.0 for the tiktoken estimate), because tokenizers differ.
 
@@ -518,10 +520,10 @@ Decide these before the milestone that needs them; Claude Code adds new ones her
 - [x] Is the name CAIRN free on npm, GitHub and a domain? (before v0.1) — **npm package `@emirucgun/cairn`, CLI command stays `cairn`** (decided 2026-11-27)
   - GitHub: free (repo `Emirucgun/CAIRN`). npm: unscoped `cairn` is taken, as are `cairn-cli`, `cairn-ai`, `cairn-mcp`, `cairn-memory`, `cairn-dev` and `cairnkit`, so we publish scoped. Install: `npm i -g @emirucgun/cairn`. Domain: not checked yet.
 - [x] License: MIT, or Apache-2.0 for the patent grant? (before v0.1) — **MIT** (decided 2026-11-27; see `LICENSE`)
-- [ ] Cache entry `imports`: the cache is keyed by blob hash (path-independent), but resolved import paths depend on the file's location. Store raw specifiers and resolve at read time? (before v0.1, see docs/plans/v0.1.md Q1)
-- [ ] Skeleton `generator_id`: include language and extractor version, e.g. `ts:typescript@0.1.13+x1`, so query changes and .ts/.js differences invalidate the cache? (before v0.1, Q2)
-- [ ] Token counting: tiktoken over every source file is too slow for a cold 10k-file map. Use a chars/4 estimate for `tokens.source` and exact counts only for served text? (before v0.1, Q3)
-- [ ] Default agent id when no `--agent`, `CAIRN_AGENT` or adapter is present: `default`? (before v0.1, Q4)
+- [x] Cache entry `imports`: the cache is keyed by blob hash (path-independent), but resolved import paths depend on the file's location. Store raw specifiers and resolve at read time? (before v0.1, see docs/plans/v0.1.md Q1) — **Raw specifiers, resolved at read time** (decided 2026-11-27)
+- [x] Skeleton `generator_id`: include language and extractor version, e.g. `ts:typescript@0.1.13+x1`, so query changes and .ts/.js differences invalidate the cache? (before v0.1, Q2) — **Yes, `ts:<lang>@<grammar-pkg-version>+x<extractor-version>`** (decided 2026-11-27)
+- [x] Token counting: tiktoken over every source file is too slow for a cold 10k-file map. Use a chars/4 estimate for `tokens.source` and exact counts only for served text? (before v0.1, Q3) — **Yes: chars/4 for `tokens.source`, exact tiktoken for served text** (decided 2026-11-27)
+- [x] Default agent id when no `--agent`, `CAIRN_AGENT` or adapter is present: `default`? (before v0.1, Q4) — **`default`, with a hint** (decided 2026-11-27)
 - [ ] Default local model for summaries, chosen after testing 2–3 small coding models on quality vs. speed (before v0.2)
 - [ ] Should summaries be shareable (pushed in a ref) so a team builds the cache once, or stay local? (before v0.3)
 - [ ] Should prompts be stored in records by default, given they are pushed with the repo? (before v0.3)
