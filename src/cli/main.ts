@@ -3,6 +3,7 @@ import { ConfigError } from "../core/config.js";
 import { PathNotInSnapshotError } from "../core/map.js";
 import { SymbolNotFoundError, UnreadableFileError } from "../core/read.js";
 import { InvalidAgentIdError } from "../core/sessions.js";
+import { InvalidSinceError } from "../core/stats.js";
 import { CallCapError, ConfirmationRequiredError, ConsentRequiredError, SummariesOffError } from "../core/summarize/index.js";
 import { SummarizerError } from "../summarizers/index.js";
 import { NotInitializedError } from "../core/snapshot.js";
@@ -15,11 +16,12 @@ import { registerDoctor } from "./doctor.js";
 import { registerInit } from "./init.js";
 import { registerMap } from "./map.js";
 import { registerRead } from "./read.js";
+import { registerStats } from "./stats.js";
 import { registerSummarize } from "./summarize.js";
 import { CliError, type Io } from "./io.js";
 
 /** Errors whose message already tells the user what to do. */
-const EXPECTED = [CliError, NotARepoError, GitTooOldError, GitNotFoundError, NotInitializedError, ConfigError, SchemaTooNewError, InvalidFormatError, PathNotInSnapshotError, PathOutsideRepoError, SymbolNotFoundError, UnreadableFileError, InvalidAgentIdError, SummariesOffError, SummarizerError, CallCapError, ConsentRequiredError, ConfirmationRequiredError];
+const EXPECTED = [CliError, NotARepoError, GitTooOldError, GitNotFoundError, NotInitializedError, ConfigError, SchemaTooNewError, InvalidFormatError, PathNotInSnapshotError, PathOutsideRepoError, SymbolNotFoundError, UnreadableFileError, InvalidAgentIdError, SummariesOffError, SummarizerError, CallCapError, ConsentRequiredError, ConfirmationRequiredError, InvalidSinceError];
 
 export function buildProgram(io: Io): Command {
   const program = new Command()
@@ -36,6 +38,7 @@ export function buildProgram(io: Io): Command {
   registerRead(program, io);
   registerContext(program, io);
   registerSummarize(program, io);
+  registerStats(program, io);
   for (const cmd of program.commands) cmd.exitOverride();
   return program;
 }

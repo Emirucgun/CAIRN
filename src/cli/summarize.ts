@@ -1,9 +1,10 @@
 import type { Command } from "commander";
 import { describePlan, executeSummaries, planSummaries, prepareRun } from "../core/summarize/index.js";
-import { formatUsd } from "../core/summarize/pricing.js";
+import { costUsd, formatUsd } from "../core/summarize/pricing.js";
 import { withWorkspace } from "../core/workspace.js";
 import { CliError, emit, type GlobalOptions, type Io } from "./io.js";
 import { formatTokens } from "./map.js";
+import { logEvents, statsAgent } from "./stats-log.js";
 
 function positiveInt(v: string): number {
   const n = Number(v);
@@ -73,6 +74,24 @@ export function registerSummarize(program: Command, io: Io): void {
         const progress =
           io.interactive && !g.json ? (d: number, t: number) => io.err(`\rSummarizing ${d}/${t}…${d === t ? "\n" : ""}`) : undefined;
         const res = await executeSummaries(ws, planned, progress);
+        const agent = statsAgent(g, io);
+        if (agent) {
+          const price = planned.estimate.price;
+          logEvents(
+            ws,
+            res.calls.map((c) => ({
+              schema: 1 as const,
+              type: "summarize" as const,
+              ts: new Date().toISOString(),
+              agent,
+              provider: planned.summarizer.provider,
+              model: planned.summarizer.model,
+              input_tokens: c.usage.input_tokens,
+              output_tokens: c.usage.output_tokens,
+              cost_usd: price ? costUsd(price, c.usage.input_tokens, c.usage.output_tokens) : null,
+            })),
+          );
+        }
         for (const w of ws.warnings) io.err(`cairn: ${w}\n`);
 
         emit(io, g, { decision, plan, result: res }, () => {

@@ -3,6 +3,7 @@ import { buildMap, DEFAULT_MAP_DEPTH, DEFAULT_MAX_SYMBOLS, type MapNode } from "
 import { renderSymbol } from "../core/skeleton/index.js";
 import { withWorkspace } from "../core/workspace.js";
 import { CliError, emit, type GlobalOptions, type Io } from "./io.js";
+import { logServe } from "./stats-log.js";
 
 const SKIP_LABEL = { "too-large": "over 1 MiB", binary: "binary", secret: "skipped: may contain a secret" } as const;
 
@@ -57,7 +58,8 @@ export function registerMap(program: Command, io: Io): void {
           ...(opts.all !== undefined && { all: opts.all }),
           ...(opts.maxSymbols !== undefined && { maxSymbols: opts.maxSymbols }),
         });
-        emit(io, g, { ...result, warnings: ws.warnings }, () => renderMap(result.root).join("\n") + "\n" + summaryHint(result.summaries, path));
+        const out = emit(io, g, { ...result, warnings: ws.warnings }, () => renderMap(result.root).join("\n") + "\n" + summaryHint(result.summaries, path));
+        logServe(ws, g, io, "map", out, result.root.tokens);
         for (const w of ws.warnings) io.err(`cairn: ${w}\n`);
       });
     });

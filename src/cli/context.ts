@@ -5,6 +5,7 @@ import { renderSymbol } from "../core/skeleton/index.js";
 import { withWorkspace } from "../core/workspace.js";
 import { emit, type GlobalOptions, type Io } from "./io.js";
 import { renderMap } from "./map.js";
+import { logServe } from "./stats-log.js";
 
 const STATUS = { A: "added", M: "modified", D: "deleted", T: "type changed" } as const;
 const WITHHELD = {
@@ -93,11 +94,12 @@ export function registerContext(program: Command, io: Io): void {
       const agent = resolveAgent(g.agent, io.env);
       await withWorkspace(io.cwd, async (ws) => {
         const result = await buildContext(ws, agent);
-        emit(io, g, { ...result, warnings: ws.warnings }, () => renderContext(result));
+        const out = emit(io, g, { ...result, warnings: ws.warnings }, () => renderContext(result));
         for (const w of ws.warnings) io.err(`cairn: ${w}\n`);
         // SPEC: update the cursor only after the output is delivered.
         await io.flush?.();
         if (opts.advance) await advanceCursor(ws, result);
+        logServe(ws, g, io, "context", out, result.fullReadTokens);
       });
     });
 }
