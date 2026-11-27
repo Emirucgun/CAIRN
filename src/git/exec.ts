@@ -69,6 +69,24 @@ function buildEnv(extra: Record<string, string> | undefined): NodeJS.ProcessEnv 
   };
 }
 
+/**
+ * Starts a long-lived git process with piped stdin/stdout (e.g. `cat-file
+ * --batch`). Same environment rules as runGit.
+ */
+export function spawnGit(args: readonly string[], opts: Pick<GitOptions, "cwd" | "env">) {
+  return execa("git", ["-c", "core.quotePath=false", ...args], {
+    cwd: opts.cwd,
+    env: buildEnv(opts.env),
+    extendEnv: false,
+    reject: false,
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    encoding: "buffer",
+    buffer: false,
+  });
+}
+
 async function run(
   args: readonly string[],
   opts: GitOptions,

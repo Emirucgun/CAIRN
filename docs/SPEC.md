@@ -168,7 +168,7 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
 }
 ```
 
-`imports` holds raw import specifiers exactly as written in the source. Entries are keyed by content, not path, so resolving specifiers to repo paths happens when a command reads the entry, using the path it is being read for. `tokens.source` is a fast `chars / 4` estimate; `tokens.skeleton` and `tokens.summary`, and every count of text CAIRN serves, use `js-tiktoken`.
+`imports` holds raw import specifiers exactly as written in the source. Entries are keyed by content, not path, so resolving specifiers to repo paths happens when a command reads the entry, using the path it is being read for. `tokens.source` and `tokens.skeleton` are fast `chars / 4` estimates (exact tokenization of 10,000 typical skeletons took about 5 s, the whole cold-map budget); `tokens.summary` and every count of text CAIRN actually serves use `js-tiktoken`.
 
 Fields that don't apply to an entry are `null`, never omitted. A `skeleton`-layer entry has `summary: null` and `tokens.summary: null`; a `summary`-layer entry carries the skeleton it was built from. For `tree` entries, `tokens.source` is the sum over its children.
 
@@ -529,7 +529,7 @@ Decide these before the milestone that needs them; Claude Code adds new ones her
 - [x] License: MIT, or Apache-2.0 for the patent grant? (before v0.1) — **MIT** (decided 2026-11-27; see `LICENSE`)
 - [x] Cache entry `imports`: the cache is keyed by blob hash (path-independent), but resolved import paths depend on the file's location. Store raw specifiers and resolve at read time? (before v0.1, see docs/plans/v0.1.md Q1) — **Raw specifiers, resolved at read time** (decided 2026-11-27)
 - [x] Skeleton `generator_id`: include language and extractor version, e.g. `ts:typescript@0.1.13+x1`, so query changes and .ts/.js differences invalidate the cache? (before v0.1, Q2) — **Yes, `ts:<lang>@<grammar-pkg-version>+x<extractor-version>`** (decided 2026-11-27)
-- [x] Token counting: tiktoken over every source file is too slow for a cold 10k-file map. Use a chars/4 estimate for `tokens.source` and exact counts only for served text? (before v0.1, Q3) — **Yes: chars/4 for `tokens.source`, exact tiktoken for served text** (decided 2026-11-27)
+- [x] Token counting: tiktoken over every source file is too slow for a cold 10k-file map. Use a chars/4 estimate for `tokens.source` and exact counts only for served text? (before v0.1, Q3) — **Yes: chars/4 for `tokens.source`, exact tiktoken for served text** (decided 2026-11-27); amended during v0.1 step 6: `tokens.skeleton` is also chars/4, after measuring tiktoken at ~5 s per 10k skeletons (pending your confirmation)
 - [x] Default agent id when no `--agent`, `CAIRN_AGENT` or adapter is present: `default`? (before v0.1, Q4) — **`default`, with a hint** (decided 2026-11-27)
 - [ ] Default local model for summaries, chosen after testing 2–3 small coding models on quality vs. speed (before v0.2)
 - [ ] Should summaries be shareable (pushed in a ref) so a team builds the cache once, or stay local? (before v0.3)

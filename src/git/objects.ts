@@ -1,4 +1,4 @@
-import { runGit, runGitBuffer } from "./exec.js";
+import { GitError, runGit, runGitBuffer, spawnGit } from "./exec.js";
 import type { Repo } from "./repo.js";
 
 export type ObjectType = "blob" | "tree" | "commit";
@@ -131,4 +131,93 @@ export async function emptyTree(repo: Repo): Promise<string> {
     emptyTrees.set(repo.objectFormat, hash);
   }
   return hash;
+}
+
+export class MissingObjectError extends Error {
+  constructor(readonly hash: string) {
+    super(`git object ${hash} is missing`);
+    this.name = "MissingObjectError";
+  }
+}
+
+interface Pending {
+  hash: string;
+  resolve: (b: Buffer) => void;
+  reject: (e: Error) => void;
+}
+
+/**
+ * Reads many blobs through one `git cat-file --batch` process instead of one
+ * process per blob. Requests are answered in order; call close() when done.
+ */
+export class BlobReader {
+  private proc: ReturnType<typeof spawnGit> | null = null;
+  private readonly queue: Pending[] = [];
+  private buf: Buffer = Buffer.alloc(0);
+  private failed: Error | null = null;
+
+  constructor(private readonly repo: Repo) {}
+
+  read(hash: string): Promise<Buffer> {
+    if (this.failed) return Promise.reject(this.failed);
+    if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(hash)) return Promise.reject(new Error(`not an object hash: ${hash}`));
+    const proc = this.start();
+    return new Promise<Buffer>((resolve, reject) => {
+      this.queue.push({ hash, resolve, reject });
+      proc.stdin?.write(`${hash}\n`);
+    });
+  }
+
+  async close(): Promise<void> {
+    const proc = this.proc;
+    this.proc = null;
+    if (!proc) return;
+    proc.stdin?.end();
+    await proc;
+  }
+
+  private start(): ReturnType<typeof spawnGit> {
+    if (this.proc) return this.proc;
+    const proc = spawnGit(["cat-file", "--batch"], { cwd: this.repo.root });
+    let stderr = "";
+    proc.stderr?.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
+      this.drain();
+    });
+    void proc.then((r) => {
+      if (this.queue.length) this.fail(new GitError(["cat-file", "--batch"], r.exitCode, stderr || "exited early"));
+    });
+    this.proc = proc;
+    return proc;
+  }
+
+  private drain(): void {
+    for (;;) {
+      const head = this.queue[0];
+      if (!head) return;
+      const nl = this.buf.indexOf(10);
+      if (nl < 0) return;
+      const header = this.buf.subarray(0, nl).toString("utf8");
+      if (header.endsWith(" missing")) {
+        this.buf = this.buf.subarray(nl + 1);
+        this.queue.shift();
+        head.reject(new MissingObjectError(head.hash));
+        continue;
+      }
+      const [hash, , sizeText] = header.split(" ");
+      const size = Number(sizeText);
+      if (!hash || !Number.isInteger(size)) return this.fail(new Error(`unexpected cat-file header: ${header}`));
+      if (this.buf.length < nl + 1 + size + 1) return; // wait for the rest
+      const body = Buffer.from(this.buf.subarray(nl + 1, nl + 1 + size));
+      this.buf = this.buf.subarray(nl + 1 + size + 1);
+      this.queue.shift();
+      head.resolve(body);
+    }
+  }
+
+  private fail(e: Error): void {
+    this.failed = e;
+    for (const p of this.queue.splice(0)) p.reject(e);
+  }
 }
