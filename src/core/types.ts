@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 /** Highest `schema` this build knows for each versioned JSON format. */
-export const SCHEMA = { cacheEntry: 3, sessionCursor: 1 } as const;
+export const SCHEMA = { cacheEntry: 3, sessionCursor: 1, consent: 1 } as const;
 
 const gitHash = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "expected a git object hash");
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/, "expected a sha256 hex digest");
@@ -131,6 +131,15 @@ export const SessionCursor = z.object({
   active_task: z.string().nullable(),
 });
 export type SessionCursor = z.infer<typeof SessionCursor>;
+
+// -------------------------------------------------------------------- consent
+
+/** `.cairn/consent.json`: per-repo consent to send code to an external API (SPEC §Summarizer). */
+export const ConsentFile = z.object({
+  schema: z.literal(SCHEMA.consent),
+  grants: z.array(z.object({ provider: z.string().min(1), host: z.string().min(1), granted_at: timestamp })),
+});
+export type ConsentFile = z.infer<typeof ConsentFile>;
 
 // --------------------------------------------------------------------- config
 

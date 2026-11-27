@@ -12,6 +12,7 @@ export interface CairnPaths {
   /** CAIRN's own lock. Not tmp-index.lock: git itself creates <index>.lock while writing the index. */
   snapshotLock: string;
   stats: string;
+  consent: string;
   cairnignore: string;
 }
 
@@ -26,6 +27,7 @@ export function cairnPaths(repo: Pick<Repo, "root">): CairnPaths {
     tmpIndex: join(dir, "tmp-index"),
     snapshotLock: join(dir, "snapshot.lock"),
     stats: join(dir, "stats.jsonl"),
+    consent: join(dir, "consent.json"),
     cairnignore: join(repo.root, ".cairnignore"),
   };
 }

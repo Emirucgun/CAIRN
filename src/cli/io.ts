@@ -1,8 +1,19 @@
 // Everything a command needs from its environment, injectable for tests.
+import { createInterface } from "node:readline/promises";
+
+/** Only an explicit yes counts (SPEC: consent is never assumed). */
+export function isYes(answer: string): boolean {
+  return /^\s*y(?:es)?\s*$/i.test(answer);
+}
+
 export interface Io {
   cwd: string;
   /** stdout is a terminal: pretty-print JSON for a human. */
   isTTY?: boolean;
+  /** stdin and stdout are both a terminal, so questions can be asked. */
+  interactive?: boolean;
+  /** Asks a yes/no question on stderr; true only for an explicit y/yes. */
+  ask?(question: string): Promise<boolean>;
   env: NodeJS.ProcessEnv;
   out(text: string): void;
   err(text: string): void;
@@ -15,6 +26,15 @@ export function processIo(): Io {
     cwd: process.cwd(),
     env: process.env,
     isTTY: process.stdout.isTTY === true,
+    interactive: process.stdin.isTTY === true && process.stdout.isTTY === true,
+    ask: async (question) => {
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
+      try {
+        return isYes(await rl.question(question));
+      } finally {
+        rl.close();
+      }
+    },
     out: (t) => process.stdout.write(t),
     err: (t) => process.stderr.write(t),
     flush: () =>
