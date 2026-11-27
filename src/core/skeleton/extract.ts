@@ -3,6 +3,7 @@ import type { Extracted } from "./common.js";
 import { createParser, type Lang } from "./loader.js";
 import { extractDart } from "./dart.js";
 import { extractPython } from "./python.js";
+import { extractSwift } from "./swift.js";
 import { extractTypeScript } from "./typescript.js";
 
 /**
@@ -19,6 +20,7 @@ const EXTRACTORS: Partial<Record<Lang, Extractor>> = {
   javascript: extractTypeScript,
   python: extractPython,
   dart: extractDart,
+  swift: extractSwift,
 };
 
 export function isSupported(lang: Lang): boolean {
