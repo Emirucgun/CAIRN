@@ -1,12 +1,16 @@
 // What CAIRN never indexes (SPEC §Security): anything git ignores (handled by
 // `git add`), built-in denies, .cairnignore, and, for skeletons only, files
-// over 1 MiB or binary.
+// over 1 MiB, binary, or containing a private key.
 import { readFile } from "node:fs/promises";
 import ignore, { type Ignore } from "ignore";
 import { CAIRN_DIR } from "./paths.js";
+import { scanForSecrets } from "./secrets.js";
+
+/** SSH key file names, exactly (not `id_*`, which would hide files like src/id_generator.ts). */
+const SSH_KEY_NAMES = ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"].flatMap((n) => [n, `${n}.pub`, `${n}-cert.pub`]);
 
 /** SPEC §Security built-in denies, in gitignore syntax (no slash → any depth). */
-export const BUILTIN_DENIES = [".env*", "*.pem", "*.key", "id_*", "*.p12", "secrets.*"] as const;
+export const BUILTIN_DENIES: readonly string[] = [".env*", "*.pem", "*.key", "*.p12", "secrets.*", ...SSH_KEY_NAMES];
 
 /**
  * The same denies as git pathspec globs, passed to `git add` as excludes so
@@ -46,10 +50,21 @@ export function buildIgnoreRules(cairnignore: string): IgnoreRules {
   };
 }
 
-/** Whether a file's content may get a skeleton: not too big and not binary. */
-export function isIndexableContent(size: number, head: Uint8Array): boolean {
-  if (size > MAX_INDEXABLE_BYTES) return false;
-  const n = Math.min(head.length, BINARY_SNIFF_BYTES);
-  for (let i = 0; i < n; i++) if (head[i] === 0) return false;
-  return true;
+export type IndexableVerdict =
+  | { ok: true }
+  | { ok: false; reason: "too-large" | "binary" }
+  | { ok: false; reason: "secret"; pattern: string; line: number };
+
+/**
+ * Whether a file's content may be skeletoned or cached: not over 1 MiB, not
+ * binary, and no private key anywhere in it, whatever the file is called.
+ * `content` must be the whole file (it is only read when size is allowed).
+ */
+export function checkIndexable(size: number, content: Uint8Array): IndexableVerdict {
+  if (size > MAX_INDEXABLE_BYTES) return { ok: false, reason: "too-large" };
+  const n = Math.min(content.length, BINARY_SNIFF_BYTES);
+  for (let i = 0; i < n; i++) if (content[i] === 0) return { ok: false, reason: "binary" };
+  const [hit] = scanForSecrets(Buffer.from(content.buffer, content.byteOffset, content.byteLength).toString("utf8"));
+  if (hit) return { ok: false, reason: "secret", pattern: hit.pattern, line: hit.line };
+  return { ok: true };
 }

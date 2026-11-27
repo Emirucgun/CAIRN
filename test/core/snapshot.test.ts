@@ -69,6 +69,17 @@ describe("snapshot", () => {
     }
   });
 
+  it("indexes src/id_generator.ts but never SSH key files", async () => {
+    const r = init(makeRepo({ "src/id_generator.ts": "export function nextId(): string { return '1'; }\n" }));
+    r.write("id_ed25519", "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbg==\n");
+    r.write("id_ed25519.pub", "ssh-ed25519 AAAAC3 fixture\n");
+    r.write("deploy/id_rsa-cert.pub", "ssh-rsa-cert-v01 AAAA fixture\n");
+    guard(r);
+    const s = await snapshot(await openRepo(r.dir));
+    expect(files(r, s.tree)).toEqual(["src/id_generator.ts"]);
+    expect(() => r.git("cat-file", "-e", r.git("hash-object", "id_ed25519").trim())).toThrow();
+  });
+
   it("keeps files that are tracked even though .gitignore matches them, like git does", async () => {
     const r = init(makeRepo({ "build/keep.js": "tracked\n" }));
     r.write(".gitignore", "build/\n");
