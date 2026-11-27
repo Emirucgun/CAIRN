@@ -518,6 +518,10 @@ Decide these before the milestone that needs them; Claude Code adds new ones her
 - [x] Is the name CAIRN free on npm, GitHub and a domain? (before v0.1) — **npm package `@emirucgun/cairn`, CLI command stays `cairn`** (decided 2026-11-27)
   - GitHub: free (repo `Emirucgun/CAIRN`). npm: unscoped `cairn` is taken, as are `cairn-cli`, `cairn-ai`, `cairn-mcp`, `cairn-memory`, `cairn-dev` and `cairnkit`, so we publish scoped. Install: `npm i -g @emirucgun/cairn`. Domain: not checked yet.
 - [x] License: MIT, or Apache-2.0 for the patent grant? (before v0.1) — **MIT** (decided 2026-11-27; see `LICENSE`)
+- [ ] Cache entry `imports`: the cache is keyed by blob hash (path-independent), but resolved import paths depend on the file's location. Store raw specifiers and resolve at read time? (before v0.1, see docs/plans/v0.1.md Q1)
+- [ ] Skeleton `generator_id`: include language and extractor version, e.g. `ts:typescript@0.1.13+x1`, so query changes and .ts/.js differences invalidate the cache? (before v0.1, Q2)
+- [ ] Token counting: tiktoken over every source file is too slow for a cold 10k-file map. Use a chars/4 estimate for `tokens.source` and exact counts only for served text? (before v0.1, Q3)
+- [ ] Default agent id when no `--agent`, `CAIRN_AGENT` or adapter is present: `default`? (before v0.1, Q4)
 - [ ] Default local model for summaries, chosen after testing 2–3 small coding models on quality vs. speed (before v0.2)
 - [ ] Should summaries be shareable (pushed in a ref) so a team builds the cache once, or stay local? (before v0.3)
 - [ ] Should prompts be stored in records by default, given they are pushed with the repo? (before v0.3)
