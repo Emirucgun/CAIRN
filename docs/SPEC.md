@@ -238,7 +238,7 @@ GIT_INDEX_FILE=.cairn/tmp-index git write-tree       # → snapshot tree hash
 ```
 
 - Then apply `.cairnignore` by removing matching paths from the tmp index before `write-tree`.
-- In practice `read-tree --reset HEAD` is used: same resulting index, but it keeps cached stat info for unchanged files so `add -A` only rehashes what changed. Name-based built-in denies are passed to `add` as exclude pathspecs so untracked secrets are never hashed into `.git/objects`; tracked denied files are removed from the tmp index like `.cairnignore` matches.
+- In practice `read-tree --reset HEAD` is used: same resulting index, but it keeps cached stat info for unchanged files so `add -A` only rehashes what changed. (`-m` would too, but refuses with "not uptodate" when a scratch-index entry differs from both HEAD and the work tree.) Name-based built-in denies are passed to `add` as exclude pathspecs so untracked secrets are never hashed into `.git/objects`; tracked denied files are removed from the tmp index like `.cairnignore` matches.
 - CAIRN's own lock is `.cairn/snapshot.lock` (git itself uses `tmp-index.lock` while writing the tmp index).
 - Must never modify `.git/index`, `HEAD`, or any ref other than `refs/notes/cairn`.
 - Target: under 300 ms on a 10,000-file repo after the first run (git's stat cache does the work).
