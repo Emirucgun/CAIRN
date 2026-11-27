@@ -382,7 +382,7 @@ The CLI and MCP server call the same core functions; every MCP tool has a CLI eq
 | `cairn plan add\|task\|list` | Plan and task records | v0.6 |
 | `cairn release <version>` | Release record plus generated changelog | v0.6 |
 | `cairn promote <release> --format post\|store\|tweet` | Draft launch copy from a release | v0.6 |
-| `cairn doctor` | Check git version, config, cache integrity, adapters | v0.1 |
+| `cairn doctor` | Check git version, config, summarizer key (env var name only, never the value) and consent, cache integrity, adapters | v0.1 (summarizer checks v0.2) |
 
 ### MCP tools
 

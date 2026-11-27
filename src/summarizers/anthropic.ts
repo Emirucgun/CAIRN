@@ -7,7 +7,7 @@ export interface AnthropicOptions {
   model: string;
   /** From ANTHROPIC_API_KEY; null lets the SDK use ANTHROPIC_AUTH_TOKEN. */
   apiKey: string | null;
-  /** Tests only; otherwise the SDK uses ANTHROPIC_BASE_URL or the public API. */
+  /** ANTHROPIC_BASE_URL from the caller's env, or a mock server in tests; else the public API. */
   baseURL?: string;
   maxRetries?: number;
   timeoutMs?: number;

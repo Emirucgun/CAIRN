@@ -7,11 +7,11 @@ const MARK: Record<CheckStatus, string> = { ok: "ok  ", warn: "warn", fail: "FAI
 export function registerDoctor(program: Command, io: Io): void {
   program
     .command("doctor")
-    .description("check git version, config, cache integrity and grammars")
+    .description("check git version, config, summarizer key and consent, cache integrity and grammars")
     .option("--fix", "remove corrupt cache entries and unreadable session cursors")
     .action(async (opts: { fix?: boolean }, cmd: Command) => {
       const g = cmd.optsWithGlobals<GlobalOptions>();
-      const report = await runDoctor(io.cwd, { fix: opts.fix ?? false });
+      const report = await runDoctor(io.cwd, { fix: opts.fix ?? false, env: io.env });
       emit(io, g, report, () => {
         const width = Math.max(...report.checks.map((c) => c.id.length));
         const lines = report.checks.map((c) => {

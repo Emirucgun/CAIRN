@@ -25,7 +25,10 @@ export function createSummarizer(cfg: Config["summarizer"], env: NodeJS.ProcessE
     if (!apiKey && !env.ANTHROPIC_AUTH_TOKEN) {
       throw new SummarizerError("missing-key", "set ANTHROPIC_API_KEY to use the anthropic summarizer (keys are never read from config.toml)");
     }
-    return new AnthropicSummarizer({ model, apiKey });
+    // Read ANTHROPIC_BASE_URL from the same env as the key, so consent and
+    // doctor name the host requests really go to.
+    const baseURL = env.ANTHROPIC_BASE_URL || undefined;
+    return new AnthropicSummarizer({ model, apiKey, ...(baseURL ? { baseURL } : {}) });
   }
 
   let baseUrl: string = cfg.base_url ?? DEFAULT_BASE_URL[cfg.provider];
