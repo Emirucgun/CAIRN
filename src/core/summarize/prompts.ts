@@ -1,7 +1,7 @@
 // Prompt p1 (SPEC §Algorithm 2 steps 4-5). Bump PROMPT_VERSION when the text
 // changes: it is part of the summary generator id, so old summaries rebuild.
 import { renderSymbol } from "../skeleton/index.js";
-import type { SkeletonSymbol } from "../types.js";
+import type { Config, SkeletonSymbol } from "../types.js";
 
 export const PROMPT_VERSION = 1;
 
@@ -72,4 +72,13 @@ export function cleanSummary(text: string): string {
     .trim();
   if (s.length > 600) s = `${s.slice(0, 599).trimEnd()}…`;
   return s;
+}
+
+/**
+ * The summary generator id the config points at, without building a
+ * summarizer (no key needed just to show cached summaries). Null when off.
+ */
+export function configuredSummaryGenerator(cfg: Config["summarizer"]): string | null {
+  if (cfg.provider === "off" || !cfg.model) return null;
+  return `${cfg.provider}/${cfg.model}@p${PROMPT_VERSION}`;
 }

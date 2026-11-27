@@ -4,7 +4,8 @@ import { createHash } from "node:crypto";
 import { generatorId, type Summarizer, type SummarizerError, type SummaryRequest, type SummaryResult } from "./types.js";
 
 export class FakeSummarizer implements Summarizer {
-  readonly provider = "fake" as const;
+  /** Defaults to "fake"; tests may pose as a configured provider so `map` finds the summaries. */
+  provider: Summarizer["provider"] = "fake";
   readonly host = "fake.invalid";
   readonly calls: SummaryRequest[] = [];
 

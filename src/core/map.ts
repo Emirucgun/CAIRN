@@ -5,6 +5,8 @@ import { lsTree, type TreeEntry } from "../git/index.js";
 import { extractSkeleton } from "./skeleton/extract.js";
 import { folderSkeleton, type SkeletonDeps, type SkipReason, skeletonFor } from "./skeleton/index.js";
 import { ParsePool } from "./skeleton/pool.js";
+import { isSummarizable } from "./summarize/plan.js";
+import { configuredSummaryGenerator } from "./summarize/prompts.js";
 import { snapshot } from "./snapshot.js";
 import type { SkeletonSymbol } from "./types.js";
 import { mapLimit, PathOutsideRepoError, toRepoPath, type Workspace } from "./workspace.js";
@@ -51,7 +53,7 @@ export interface MapFile {
   hiddenSymbols: number;
   /** Why a supported-looking file has no skeleton; unsupported languages are not flagged. */
   skipped: Exclude<SkipReason, "unsupported"> | null;
-  summary: null;
+  summary: SummaryRef | null;
 }
 
 export interface MapFolder {
@@ -62,16 +64,25 @@ export interface MapFolder {
   tokens: number;
   /** null when the folder is beyond --depth and shown collapsed. */
   children: MapNode[] | null;
-  summary: null;
+  summary: SummaryRef | null;
 }
 
 export type MapNode = MapFile | MapFolder;
+
+/** A cached summary, labelled with the git object hash it was built from (SPEC §Failure modes). */
+export interface SummaryRef {
+  text: string;
+  /** Blob or tree hash of the content summarized. */
+  hash: string;
+}
 
 export interface MapResult {
   root: MapNode;
   tree: string;
   depth: number;
   stats: { files: number; parsed: number; cached: number; skipped: number; ms: number };
+  /** Summaries shown, and folders shown without one, when a summarizer is configured. */
+  summaries: { generator: string; shown: number; foldersMissing: number } | null;
 }
 
 export class PathNotInSnapshotError extends Error {
@@ -87,6 +98,8 @@ export const DEFAULT_MAX_SYMBOLS = 40;
 export const POOL_THRESHOLD = 300;
 /** Cache misses parsed inline before the worker pool is started. */
 export const INLINE_PARSES = 32;
+/** Per-file summary reads allowed for folders that have no folder summary entry. */
+export const MAX_FALLBACK_READS = 300;
 
 interface Dir {
   path: string;
@@ -153,6 +166,50 @@ export async function buildMap(ws: Workspace, opts: MapOptions = {}): Promise<Ma
     await pool?.close();
   }
 
+  // Cached summaries only (SPEC §Algorithm 2 step 3): never a call. One read per
+  // folder shown; an expanded folder's entry also carries its files' summaries.
+  const generator = configuredSummaryGenerator(ws.config.summarizer);
+  const summaries = new Map<string, SummaryRef>();
+  let foldersMissing = 0;
+  let fallbackReads = 0;
+  if (generator) {
+    const lookup = async (kind: "blob" | "tree", hash: string) => ws.cache.get({ kind, hash, layer: "summary", generator });
+    if (single) {
+      const e = await lookup("blob", single.hash);
+      if (e?.summary) summaries.set(single.path, { text: e.summary, hash: single.hash });
+    } else {
+      const shownDirs = new Map<string, boolean>(); // path -> expanded
+      for (const d of expanded) {
+        shownDirs.set(d.path, true);
+        for (const c of d.dirs.values()) if (!shownDirs.has(c.path)) shownDirs.set(c.path, false);
+      }
+      for (const [path, isExpanded] of shownDirs) {
+        const hash = path === "" ? listing.tree : listing.trees.get(path);
+        if (!hash) continue;
+        const e = await lookup("tree", hash);
+        if (!e?.summary) {
+          if (!summaries.has(path)) foldersMissing++;
+          // No current folder entry (e.g. right after an edit): unchanged files keep
+          // their own entries. Bounded so a big, partly summarized map stays fast.
+          const d = isExpanded ? expanded.find((x) => x.path === path) : undefined;
+          for (const f of d?.files ?? []) {
+            if (fallbackReads >= MAX_FALLBACK_READS || !isSummarizable(f.path)) continue;
+            fallbackReads++;
+            const fe = await lookup("blob", f.hash);
+            if (fe?.summary) summaries.set(f.path, { text: fe.summary, hash: f.hash });
+          }
+          continue;
+        }
+        summaries.set(path, { text: e.summary, hash });
+        if (isExpanded) {
+          for (const c of e.children ?? []) {
+            if (c.summary) summaries.set(path === "" ? c.name : `${path}/${c.name}`, { text: c.summary, hash: c.hash });
+          }
+        }
+      }
+    }
+  }
+
   const fileNode = (e: TreeEntry): MapFile => {
     const k = known.get(e.path);
     const all = k?.skeleton ?? [];
@@ -167,7 +224,7 @@ export async function buildMap(ws: Workspace, opts: MapOptions = {}): Promise<Ma
       symbols,
       hiddenSymbols: all.length - symbols.length,
       skipped: k?.skipped ?? null,
-      summary: null,
+      summary: summaries.get(e.path) ?? null,
     };
   };
 
@@ -184,12 +241,12 @@ export async function buildMap(ws: Workspace, opts: MapOptions = {}): Promise<Ma
             ...d.files.sort(byPath).map(fileNode),
           ]
         : null,
-    summary: null,
+    summary: summaries.get(d.path) ?? null,
   });
 
   const root = single ? fileNode(single) : folderNode(rootDir as Dir, 0);
   stats.ms = Math.round(performance.now() - t0);
-  return { root, tree: listing.tree, depth, stats };
+  return { root, tree: listing.tree, depth, stats, summaries: generator ? { generator, shown: summaries.size, foldersMissing } : null };
 }
 
 const byPath = (a: { path: string }, b: { path: string }) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
