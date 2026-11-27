@@ -28,9 +28,26 @@ function envFor(repo: Repo, indexFile: string): Record<string, string> {
   return { GIT_INDEX_FILE: abs };
 }
 
+export interface ReadTreeOptions {
+  /**
+   * Keep cached stat info for entries whose content matches the tree
+   * (`read-tree -m`), so the following `add` only rehashes files that
+   * changed. The resulting index content is the same either way.
+   */
+  keepStat?: boolean;
+}
+
 /** Loads a tree into the scratch index, or empties it when `treeish` is null. */
-export async function readTreeInto(repo: Repo, indexFile: string, treeish: string | null): Promise<void> {
-  const args = treeish === null ? ["read-tree", "--empty"] : ["read-tree", "--end-of-options", treeish];
+export async function readTreeInto(
+  repo: Repo,
+  indexFile: string,
+  treeish: string | null,
+  opts: ReadTreeOptions = {},
+): Promise<void> {
+  const args =
+    treeish === null
+      ? ["read-tree", "--empty"]
+      : ["read-tree", ...(opts.keepStat ? ["-m"] : []), "--end-of-options", treeish];
   await runGit(args, { cwd: repo.root, env: envFor(repo, indexFile) });
 }
 

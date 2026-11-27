@@ -238,6 +238,8 @@ GIT_INDEX_FILE=.cairn/tmp-index git write-tree       # → snapshot tree hash
 ```
 
 - Then apply `.cairnignore` by removing matching paths from the tmp index before `write-tree`.
+- In practice `read-tree -m HEAD` is used: same resulting index, but it keeps cached stat info for unchanged files so `add -A` only rehashes what changed. Built-in denies are passed to `add` as exclude pathspecs so untracked secrets are never hashed into `.git/objects`; tracked denied files are removed from the tmp index like `.cairnignore` matches.
+- CAIRN's own lock is `.cairn/snapshot.lock` (git itself uses `tmp-index.lock` while writing the tmp index).
 - Must never modify `.git/index`, `HEAD`, or any ref other than `refs/notes/cairn`.
 - Target: under 300 ms on a 10,000-file repo after the first run (git's stat cache does the work).
 
@@ -528,6 +530,7 @@ Decide these before the milestone that needs them; Claude Code adds new ones her
 - [x] Skeleton `generator_id`: include language and extractor version, e.g. `ts:typescript@0.1.13+x1`, so query changes and .ts/.js differences invalidate the cache? (before v0.1, Q2) — **Yes, `ts:<lang>@<grammar-pkg-version>+x<extractor-version>`** (decided 2026-11-27)
 - [x] Token counting: tiktoken over every source file is too slow for a cold 10k-file map. Use a chars/4 estimate for `tokens.source` and exact counts only for served text? (before v0.1, Q3) — **Yes: chars/4 for `tokens.source`, exact tiktoken for served text** (decided 2026-11-27)
 - [x] Default agent id when no `--agent`, `CAIRN_AGENT` or adapter is present: `default`? (before v0.1, Q4) — **`default`, with a hint** (decided 2026-11-27)
+- [ ] Built-in deny `id_*` is meant for SSH keys (`id_rsa`, `id_ed25519`), but it also hides source files like `src/id_generator.ts` from CAIRN entirely. Keep it as is, or narrow it to `id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`? (implemented literally for now)
 - [ ] Default local model for summaries, chosen after testing 2–3 small coding models on quality vs. speed (before v0.2)
 - [ ] Should summaries be shareable (pushed in a ref) so a team builds the cache once, or stay local? (before v0.3)
 - [ ] Should prompts be stored in records by default, given they are pushed with the repo? (before v0.3)
