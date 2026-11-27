@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 /** Highest `schema` this build knows for each versioned JSON format. */
-export const SCHEMA = { cacheEntry: 2, sessionCursor: 1 } as const;
+export const SCHEMA = { cacheEntry: 3, sessionCursor: 1 } as const;
 
 const gitHash = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "expected a git object hash");
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/, "expected a sha256 hex digest");
@@ -53,7 +53,13 @@ export const SkeletonSymbol = z
   .refine((s) => s.lines[0] <= s.lines[1], { message: "lines must be [start, end] with start <= end" });
 export type SkeletonSymbol = z.infer<typeof SkeletonSymbol>;
 
-export const TreeChild = z.object({ name: z.string().min(1), kind: ObjectKind, hash: gitHash });
+export const TreeChild = z.object({
+  name: z.string().min(1),
+  kind: ObjectKind,
+  hash: gitHash,
+  /** Summary layer only: the child's own summary text (schema 3); null everywhere else. */
+  summary: z.string().nullable(),
+});
 export type TreeChild = z.infer<typeof TreeChild>;
 
 export const SKIP_REASONS = ["too-large", "binary", "secret"] as const;
@@ -100,11 +106,16 @@ export const CacheEntry = z
     const folderSkeleton = e.object.kind === "tree" && e.layer === "skeleton";
     if (folderSkeleton && e.files === null) issue("folder skeleton entries must list files");
     if (!folderSkeleton && e.files !== null) issue("only folder skeleton entries have files");
+    if (e.layer === "skeleton" && e.children?.some((c) => c.summary !== null)) issue("skeleton entries' children have summary: null");
   });
 
-/** Cache entry migrations: schema 1 had no `files` field. */
+/** Cache entry migrations: schema 1 had no `files`; schema 2 children had no `summary`. */
 export const CACHE_ENTRY_MIGRATIONS = {
   1: (d: Record<string, unknown>) => ({ ...d, files: null }),
+  2: (d: Record<string, unknown>) => ({
+    ...d,
+    children: Array.isArray(d.children) ? d.children.map((c: Record<string, unknown>) => ({ ...c, summary: null })) : d.children,
+  }),
 };
 export type CacheEntry = z.infer<typeof CacheEntry>;
 

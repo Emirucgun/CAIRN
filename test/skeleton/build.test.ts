@@ -40,7 +40,7 @@ describe("skeletonFor", () => {
     expect(first).toMatchObject({ status: "ok", cached: false });
     if (first.status !== "ok") throw new Error();
     expect(first.entry).toMatchObject({
-      schema: 2,
+      schema: 3,
       files: null,
       layer: "skeleton",
       lang: "typescript",

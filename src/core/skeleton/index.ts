@@ -75,7 +75,7 @@ export async function skeletonFor(file: FileRef, deps: SkeletonDeps): Promise<Sk
 export function makeEntry(file: FileRef, lang: Lang, src: string, extracted: Extracted, created: string): CacheEntry {
   const generator = skeletonGenerator(lang);
   return {
-    schema: 2,
+    schema: 3,
     key: cacheKey({ kind: "blob", hash: file.hash, layer: "skeleton", generator }),
     object: { kind: "blob", hash: file.hash },
     layer: "skeleton",
