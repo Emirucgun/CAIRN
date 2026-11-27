@@ -1,5 +1,5 @@
 // v0.1 acceptance: `cairn map` on a 10,000-file repo, under 5 s cold and
-// under 1 s warm. Runs the built CLI (pnpm build first) as a separate
+// under 1 s warm, each judged on the median of 3 samples. Runs the built CLI (pnpm build first) as a separate
 // process, so Node startup is included. The gate uses --depth 99, which
 // parses every file; the default depth is reported for reference.
 //
@@ -94,7 +94,18 @@ function generate(dir: string, n: number): void {
 /** Set CAIRN_PERF_PROFILE=<dir> to write a V8 CPU profile per run. */
 const profileDir = process.env.CAIRN_PERF_PROFILE;
 
-function run(cwd: string, args: string[]): { ms: number; stats: Record<string, number> } {
+interface Run {
+  ms: number;
+  stats: Record<string, number>;
+}
+
+function median(xs: readonly number[]): number {
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? (sorted[mid] as number) : Math.round(((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2);
+}
+
+function run(cwd: string, args: string[]): Run {
   const nodeArgs = profileDir ? ["--cpu-prof", `--cpu-prof-dir=${profileDir}`] : [];
   const t0 = performance.now();
   const res = spawnSync(process.execPath, [...nodeArgs, CLI, "--json", ...args], { cwd, env, encoding: "utf8", maxBuffer: 1 << 30 });
@@ -115,27 +126,43 @@ try {
   console.log(`fixture: ${FILES} files in ${Math.round(performance.now() - g0)} ms (${dir})`);
   if (process.env.CAIRN_PERF_FIXTURE_ONLY) process.exit(0);
 
-  const cold = run(dir, ["map", "--depth", "99"]);
-  const warm = run(dir, ["map", "--depth", "99"]);
-  const warm2 = run(dir, ["map", "--depth", "99"]);
-  // An edit, as in normal use: one file re-parsed, the rest from the cache.
-  writeFileSync(join(dir, "pkg0/module0/part0/file0.ts"), tsFile(0) + "\nexport const edited = true;\n");
-  const edited = run(dir, ["map", "--depth", "99"]);
+  // Each gated measurement runs SAMPLES times and is judged on the median:
+  // GitHub runners vary over 60% in speed between and within jobs, and one
+  // slow sample shouldn't decide a gate (decided 2026-11-27).
+  const SAMPLES = 3;
+  const deep = ["map", "--depth", "99"];
+  const coldRuns: Run[] = [];
+  const warmRuns: Run[] = [];
+  const editRuns: Run[] = [];
+  for (let i = 0; i < SAMPLES; i++) {
+    // Cold: no cache and no scratch index, so the snapshot rehashes every file.
+    rmSync(join(dir, ".cairn", "cache"), { recursive: true, force: true });
+    rmSync(join(dir, ".cairn", "tmp-index"), { force: true });
+    coldRuns.push(run(dir, deep));
+  }
+  for (let i = 0; i < SAMPLES; i++) warmRuns.push(run(dir, deep));
+  for (let i = 0; i < SAMPLES; i++) {
+    // An edit, as in normal use: the edited folder and its parents are re-parsed.
+    writeFileSync(join(dir, "pkg0/module0/part0/file0.ts"), tsFile(0) + `\nexport const edited${i} = true;\n`);
+    editRuns.push(run(dir, deep));
+  }
   const dflt = run(dir, ["map"]);
 
   const rows = [
-    ["cold, --depth 99", cold, COLD_LIMIT_MS],
-    ["warm, --depth 99", warm, WARM_LIMIT_MS],
-    ["warm again", warm2, WARM_LIMIT_MS],
-    ["after one edit", edited, WARM_LIMIT_MS],
-    ["warm, default depth", dflt, null],
+    ["cold, --depth 99", coldRuns, COLD_LIMIT_MS],
+    ["warm, --depth 99", warmRuns, WARM_LIMIT_MS],
+    ["after one edit", editRuns, WARM_LIMIT_MS],
+    ["warm, default depth", [dflt], null],
   ] as const;
   let failed = false;
-  for (const [label, r, limit] of rows) {
-    const ok = limit === null || r.ms < limit;
+  for (const [label, runs, limit] of rows) {
+    const med = median(runs.map((r) => r.ms));
+    const ok = limit === null || med < limit;
     failed ||= !ok;
-    const target = limit === null ? "" : ` (target < ${limit} ms) ${ok ? "PASS" : "FAIL"}`;
-    console.log(`${label.padEnd(20)} ${String(r.ms).padStart(6)} ms  parsed ${r.stats.parsed}, cached ${r.stats.cached}${target}`);
+    const last = runs[runs.length - 1] as Run;
+    const samples = runs.length > 1 ? `  [${runs.map((r) => r.ms).join(", ")}]` : "";
+    const target = limit === null ? "" : ` (median, target < ${limit} ms) ${ok ? "PASS" : "FAIL"}`;
+    console.log(`${label.padEnd(20)} ${String(med).padStart(6)} ms${target}${samples}  parsed ${last.stats.parsed}, cached ${last.stats.cached}`);
   }
   if (FILES !== 10_000) console.log("(targets apply to 10,000 files; this run is informational)");
   else if (process.env.CAIRN_PERF_REPORT_ONLY) console.log(`report only: ${failed ? "some targets missed" : "all targets met"}`);
