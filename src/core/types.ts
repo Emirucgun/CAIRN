@@ -123,15 +123,33 @@ export type SessionCursor = z.infer<typeof SessionCursor>;
 
 // --------------------------------------------------------------------- config
 
-export const SUMMARIZER_PROVIDERS = ["ollama", "anthropic", "openai-compatible", "off"] as const;
+export const SUMMARIZER_PROVIDERS = ["off", "anthropic", "openai-compatible", "ollama"] as const;
+
+/** Setting names that look like credentials: keys come only from env vars (SPEC §Summarizer). */
+export const KEY_LIKE_SETTINGS = ["api_key", "apikey", "key", "token", "secret", "password"] as const;
 
 export const Config = z.strictObject({
   summarizer: z
     .strictObject({
-      provider: z.enum(SUMMARIZER_PROVIDERS).default("ollama"),
-      model: z.string().min(1).default("qwen2.5-coder:7b"),
+      provider: z.enum(SUMMARIZER_PROVIDERS).default("off"),
+      /** Required when provider is not off; there is no default model. */
+      model: z.string().min(1).optional(),
+      /** openai-compatible and ollama only. */
+      base_url: z.url({ protocol: /^https?$/ }).optional(),
+      /** Name of the env var holding the API key. */
+      api_key_env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "must be an environment variable name").optional(),
+      price_input_per_mtok: z.number().nonnegative().optional(),
+      price_output_per_mtok: z.number().nonnegative().optional(),
       max_calls_per_run: z.number().int().positive().default(200),
       concurrency: z.number().int().positive().default(4),
+    })
+    .superRefine((v, ctx) => {
+      if (v.provider !== "off" && !v.model) {
+        ctx.addIssue({ code: "custom", path: ["model"], message: `model is required when provider is "${v.provider}" (there is no default model)` });
+      }
+      if (v.base_url && v.provider === "anthropic") {
+        ctx.addIssue({ code: "custom", path: ["base_url"], message: "base_url applies to openai-compatible and ollama only" });
+      }
     })
     .prefault({}),
   context: z

@@ -61,7 +61,7 @@ Principles, in priority order when they conflict:
 2. **Git-native, zero lock-in.** Works in any git repo, changes nothing about how git is used, and `rm -rf .cairn` fully uninstalls it.
 3. **Agent-neutral.** Every feature works through MCP and the CLI; agent-specific adapters only add automatic capture.
 4. **Useful with no AI.** Skeletons, maps and context diffs work without any LLM. Summaries are an optional upgrade.
-5. **Local and private by default.** No server, no telemetry. LLM calls default to a local model.
+5. **No AI by default; bring your own key.** No server, no telemetry, and no LLM calls unless the user configures a summarizer with their own API key. Nothing is sent to an external API without per-repo consent and a cost estimate the user confirms.
 6. **Measured.** Every feature that claims to save tokens reports how many it saved.
 
 Non-goals (do not build these):
@@ -97,6 +97,7 @@ repo/
 │   ├── config.toml
 │   ├── cache/<2 hex>/<62 hex>.json   # skeleton + summary entries
 │   ├── sessions/<agent-id>.json      # session cursors
+│   ├── consent.json                  # per-repo consent to send code to an external API (v0.2)
 │   ├── tmp-index                     # scratch index for snapshots
 │   └── stats.jsonl                   # token accounting log
 └── .cairnignore                  # extra exclusions (gitignore syntax)
@@ -164,7 +165,7 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
   "children": null,
   "files": null,
   "tokens": { "source": 4210, "skeleton": 180, "summary": 45 },
-  "generator": "ollama/qwen2.5-coder:7b@p3",
+  "generator": "anthropic/claude-haiku-5-5@p3",
   "created": "2026-11-27T08:20:00Z"
 }
 ```
@@ -269,7 +270,7 @@ GIT_INDEX_FILE=.cairn/tmp-index git write-tree       # → snapshot tree hash
 
 Cost of one edited file at depth d: 1 file summary + d folder summaries, independent of repo size.
 
-Summaries run with bounded concurrency (default 4) and a hard per-run cap on LLM calls (default 200) that the CLI shows before starting large jobs.
+Summaries run with bounded concurrency (default 4) and a hard per-run cap on LLM calls (default 200). Before **any** summarize run that would make at least one call, the CLI shows the number of files, the estimated input and output tokens and the estimated cost, and asks for confirmation (see §Summarizer: bring your own key).
 
 ### 3. Context since last session
 
@@ -359,7 +360,7 @@ The CLI and MCP server call the same core functions; every MCP tool has a CLI eq
 | `cairn map [path] [--depth n]` | Tree of folders with skeleton names, plus summaries when available | v0.1 |
 | `cairn context` | Changes since this agent's last session, plus repo map and records | v0.1 |
 | `cairn read <path>[#symbol]` | One symbol's source by line range, or the whole file | v0.1 |
-| `cairn summarize [path]` | Build or refresh summaries for a path; shows LLM-call count first | v0.2 |
+| `cairn summarize [path]` | Build or refresh summaries for a path; shows files, estimated tokens and cost first, and asks to confirm | v0.2 |
 | `cairn stats [--since 7d]` | Tokens served vs. estimated full-read tokens | v0.2 |
 | `cairn note "<intent>" [--decision …] [--rejected …]` | Attach a decision record to HEAD | v0.3 |
 | `cairn why <path>` | Decision history for a path, newest first | v0.3 |
@@ -393,8 +394,10 @@ Every MCP response ends with a one-line footer such as `cairn: served 2,140 toke
 
 ```toml
 [summarizer]
-provider = "ollama"            # ollama | anthropic | openai-compatible | off
-model = "qwen2.5-coder:7b"
+provider = "off"               # off | anthropic | openai-compatible | ollama
+# model = "claude-haiku-5-5"   # required when provider is not off; no default
+# base_url = "https://api.openai.com/v1"   # openai-compatible and ollama only
+# api_key_env = "OPENAI_API_KEY"           # name of the env var holding the key
 max_calls_per_run = 200
 concurrency = 4
 
@@ -404,7 +407,26 @@ max_diff_lines = 150
 [models.factors]               # tokenizer correction per model family
 "claude" = 1.0
 "gpt" = 1.0
+
+[records]
+store_prompts = true           # false drops prompts from records (refs/notes/cairn is pushed with the repo)
 ```
+
+### Summarizer: bring your own key
+
+Summaries are off until the user turns them on. CAIRN ships no model and has no default model. The providers are implemented in v0.2; v0.1 only accepts and validates these settings.
+
+| Provider | Endpoint | Key from |
+| --- | --- | --- |
+| `anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` |
+| `openai-compatible` | `base_url` (default `https://api.openai.com/v1`); any server speaking the OpenAI chat completions API | the env var named by `api_key_env` (default `OPENAI_API_KEY`) |
+| `ollama` (optional) | `base_url` (default `http://127.0.0.1:11434`) | none |
+
+- **Keys only from environment variables.** `config.toml` never holds a key: any key-like setting there (`api_key`, `key`, `token`, `secret`) is a config error that says which env var to set instead. Keys are never written to `.cairn/`, records, logs or `stats.jsonl`.
+- **Consent once per repo.** The first summarize run in a repo that would send code to an external API asks: "Send source from this repo to <provider> at <host>? [y/N]". The answer, provider and host are stored in `.cairn/consent.json` (schema 1). Changing the provider or host asks again. Deleting `.cairn/` revokes it. An `ollama` or `openai-compatible` URL on `localhost`/`127.0.0.1`/`::1` is not external and needs no consent.
+- **Estimate and confirm every run.** Before making calls, `cairn summarize` prints the files to summarize, estimated input and output tokens and estimated cost (USD, from a built-in price table for known models, or `price_input_per_mtok` / `price_output_per_mtok` in `[summarizer]`; "cost unknown" otherwise), then asks to confirm. `--yes` confirms the run in scripts but never grants consent.
+- **Non-interactive callers can't consent.** Without a TTY (agents, the MCP server, CI), a run that lacks consent fails with a message saying to run `cairn summarize` once in a terminal. The MCP server never starts summarization by itself.
+- All other rules in §Security (ignore rules, built-in denies, secret scan) apply before anything is sent.
 
 ## Dashboard (`cairn ui`)
 
@@ -438,7 +460,7 @@ Lifecycle features are thin commands that write and read records; they add no ne
 
 ## Security, privacy and failure modes
 
-Nothing leaves the machine unless the user configures a cloud summarizer, and even then secrets and ignored files are never sent.
+Nothing leaves the machine unless the user configures a summarizer with their own key and consents for the repo, and even then secrets and ignored files are never sent.
 
 ### Rules
 
@@ -501,9 +523,9 @@ Six milestones, each shippable on its own; a milestone is done only when every b
 
 ### v0.2 — Summaries
 
-- [ ] Summarizer interface with Ollama and Anthropic providers plus a fake provider for tests
+- [ ] Summarizer interface with Anthropic and OpenAI-compatible (configurable base URL) providers, optional Ollama, plus a fake provider for tests; keys only from env vars
 - [ ] Lazy bottom-up file and folder summaries keyed by content hash and generator id
-- [ ] LLM-call cap and confirmation prompt for large runs
+- [ ] LLM-call cap; file count, token and cost estimate with confirmation before every run; per-repo consent for external APIs
 - [ ] Secret scan before every summarizer call
 - [ ] `cairn stats` reads `stats.jsonl`
 - [ ] Editing one file at depth 3 triggers exactly 4 summary calls
@@ -546,7 +568,8 @@ Decide these before the milestone that needs them; Claude Code adds new ones her
 - [x] Skeleton `generator_id`: include language and extractor version, e.g. `ts:typescript@0.1.13+x1`, so query changes and .ts/.js differences invalidate the cache? (before v0.1, Q2) — **Yes, `ts:<lang>@<grammar-pkg-version>+x<extractor-version>`** (decided 2026-11-27)
 - [x] Token counting: tiktoken over every source file is too slow for a cold 10k-file map. Use a chars/4 estimate for `tokens.source` and exact counts only for served text? (before v0.1, Q3) — **Yes: chars/4 for `tokens.source`, exact tiktoken for served text** (decided 2026-11-27); amended during v0.1 step 6: `tokens.skeleton` is also chars/4, after measuring tiktoken at ~5 s per 10k skeletons (confirmed 2026-11-27)
 - [x] Default agent id when no `--agent`, `CAIRN_AGENT` or adapter is present: `default`? (before v0.1, Q4) — **`default`, with a hint** (decided 2026-11-27)
-- [ ] Default local model for summaries, chosen after testing 2–3 small coding models on quality vs. speed (before v0.2)
+- [x] Default local model for summaries, chosen after testing 2–3 small coding models on quality vs. speed (before v0.2) — **No default model: summaries are BYOK and off by default** (decided 2026-11-27; see §Summarizer: bring your own key)
 - [ ] Should summaries be shareable (pushed in a ref) so a team builds the cache once, or stay local? (before v0.3)
 - [ ] Should prompts be stored in records by default, given they are pushed with the repo? (before v0.3)
+- [ ] Records live in git notes attached to commits, but squash and rebase merges replace branch commits with new ones, which orphans the notes on them (GitHub's squash-merge is the common case). How should records survive? Options to weigh: re-attach notes on rewrite (`notes.rewriteRef` covers local `git rebase`/`commit --amend`, but not merges done on GitHub); attach records to a stable anchor instead of branch commits (e.g. the merge base, or a dedicated `refs/notes/cairn` commit-independent store keyed by record id and linked to commits only by `links.commits`); or a `cairn notes repair` that finds orphaned records after a pull and re-attaches them by matching patch-ids or `links.paths`. (before v0.3)
 - [ ] Pricing or sponsorship model, if any, after the first public release

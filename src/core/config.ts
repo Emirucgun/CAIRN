@@ -1,12 +1,14 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { parse, TomlError } from "smol-toml";
 import { z } from "zod";
-import { Config } from "./types.js";
+import { Config, KEY_LIKE_SETTINGS } from "./types.js";
 
 /** Written by `cairn init`. Mirrors SPEC §Config; parses to exactly the zod defaults. */
 export const DEFAULT_CONFIG_TOML = `[summarizer]
-provider = "ollama"            # ollama | anthropic | openai-compatible | off
-model = "qwen2.5-coder:7b"
+provider = "off"               # off | anthropic | openai-compatible | ollama (bring your own key)
+# model = "claude-haiku-5-5"   # required when provider is not off; no default
+# base_url = "https://api.openai.com/v1"   # openai-compatible and ollama only
+# api_key_env = "OPENAI_API_KEY"           # API keys come only from env vars, never this file
 max_calls_per_run = 200
 concurrency = 4
 
@@ -39,6 +41,13 @@ export function parseConfig(text: string, path = "config.toml"): Config {
     if (e instanceof TomlError) throw new ConfigError(path, `line ${e.line}, column ${e.column}: ${e.message.split("\n")[0]}`);
     throw e;
   }
+  const keyLike = findKeyLike(raw);
+  if (keyLike) {
+    throw new ConfigError(
+      path,
+      `${keyLike} looks like a credential. API keys are read only from environment variables (ANTHROPIC_API_KEY, or the variable named by [summarizer] api_key_env), never from config.toml. Remove it.`,
+    );
+  }
   const result = Config.safeParse(raw);
   if (!result.success) throw new ConfigError(path, z.prettifyError(result.error));
   return result.data;
@@ -65,4 +74,19 @@ export async function writeDefaultConfig(path: string): Promise<boolean> {
     if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
     throw e;
   }
+}
+
+/** The first `[section] key` that looks like a credential, at any depth. */
+function findKeyLike(value: unknown, prefix = ""): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  for (const [k, v] of Object.entries(value)) {
+    const where = prefix ? `${prefix}.${k}` : k;
+    const lower = k.toLowerCase();
+    if ((KEY_LIKE_SETTINGS as readonly string[]).includes(lower) || /(^|_)(api_?key|secret|token|password)$/.test(lower)) {
+      if (lower !== "api_key_env") return where;
+    }
+    const nested = findKeyLike(v, where);
+    if (nested) return nested;
+  }
+  return null;
 }
