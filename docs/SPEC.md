@@ -515,8 +515,8 @@ Six milestones, each shippable on its own; a milestone is done only when every b
 
 Decide these before the milestone that needs them; Claude Code adds new ones here instead of guessing.
 
-- [ ] Is the name CAIRN free on npm, GitHub and a domain? (before v0.1)
-  - GitHub: free (repo `Emirucgun/CAIRN`). npm: `cairn` is taken, as are `cairn-cli`, `cairn-ai`, `cairn-mcp`, `cairn-memory`, `cairn-dev`, `cairnkit` (checked 2026-11-27). Still free: `@emirucgun/cairn`, `cairnjs`, `git-cairn`, `cairn-git`, `gitcairn`, `cairnmem`. Domain: not checked. Decision pending.
+- [x] Is the name CAIRN free on npm, GitHub and a domain? (before v0.1) — **npm package `@emirucgun/cairn`, CLI command stays `cairn`** (decided 2026-11-27)
+  - GitHub: free (repo `Emirucgun/CAIRN`). npm: unscoped `cairn` is taken, as are `cairn-cli`, `cairn-ai`, `cairn-mcp`, `cairn-memory`, `cairn-dev` and `cairnkit`, so we publish scoped. Install: `npm i -g @emirucgun/cairn`. Domain: not checked yet.
 - [x] License: MIT, or Apache-2.0 for the patent grant? (before v0.1) — **MIT** (decided 2026-11-27; see `LICENSE`)
 - [ ] Default local model for summaries, chosen after testing 2–3 small coding models on quality vs. speed (before v0.2)
 - [ ] Should summaries be shareable (pushed in a ref) so a team builds the cache once, or stay local? (before v0.3)
