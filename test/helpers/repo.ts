@@ -72,10 +72,13 @@ export function makeRepo(files: Record<string, string> = {}, opts: { commit?: bo
  * every ref except refs/notes/cairn. Compare before and after a command.
  */
 export function protectedState(repo: TempRepo): Record<string, string> {
-  const gitDir = join(repo.dir, ".git");
+  return protectedStateOf(repo.dir);
+}
+
+export function protectedStateOf(dir: string): Record<string, string> {
+  const gitDir = join(dir, ".git");
   const read = (p: string) => (existsSync(p) ? readFileSync(p) : Buffer.alloc(0));
-  const refs = repo
-    .git("for-each-ref", "--format=%(refname) %(objectname)")
+  const refs = execFileSync("git", ["for-each-ref", "--format=%(refname) %(objectname)"], { cwd: dir, env: fixtureEnv, encoding: "utf8" })
     .split("\n")
     .filter((l) => l && !l.startsWith("refs/notes/cairn "))
     .join("\n");
