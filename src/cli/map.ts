@@ -10,18 +10,19 @@ export function formatTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n);
 }
 
-export function renderMap(node: MapNode, indent = ""): string[] {
+/** `top` nodes are labelled with their full path; nested ones with their name. */
+export function renderMap(node: MapNode, indent = "", top = true): string[] {
   if (node.kind === "file") {
     const tags = [`~${formatTokens(node.tokens)} tok`];
     if (node.skipped) tags.push(SKIP_LABEL[node.skipped]);
-    const lines = [`${indent}${node.name}  (${tags.join(", ")})`];
+    const lines = [`${indent}${top ? node.path : node.name}  (${tags.join(", ")})`];
     for (const s of node.symbols) lines.push(`${indent}  ${renderSymbol(s)}`);
     if (node.hiddenSymbols > 0) lines.push(`${indent}  … ${node.hiddenSymbols} more (--all, or cairn read ${node.path})`);
     return lines;
   }
-  const head = `${indent}${node.path === "" ? "." : node.name}/  (${node.files} file${node.files === 1 ? "" : "s"}, ~${formatTokens(node.tokens)} tok)`;
+  const head = `${indent}${node.path === "" ? "." : top ? node.path : node.name}/  (${node.files} file${node.files === 1 ? "" : "s"}, ~${formatTokens(node.tokens)} tok)`;
   if (!node.children) return [head];
-  return [head, ...node.children.flatMap((c) => renderMap(c, `${indent}  `))];
+  return [head, ...node.children.flatMap((c) => renderMap(c, `${indent}  `, false))];
 }
 
 function positiveInt(name: string) {

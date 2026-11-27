@@ -221,3 +221,37 @@ export class BlobReader {
     for (const p of this.queue.splice(0)) p.reject(e);
   }
 }
+
+/** Whether an object exists (snapshot trees are unreferenced and can be pruned by `git gc`). */
+export async function objectExists(repo: Repo, hash: string): Promise<boolean> {
+  const { exitCode } = await runGit(["cat-file", "-e", "--end-of-options", hash], { cwd: repo.root, okExitCodes: [1, 128] });
+  return exitCode === 0;
+}
+
+export interface CommitInfo {
+  hash: string;
+  subject: string;
+  author: string;
+  /** ISO 8601. */
+  date: string;
+}
+
+/** Commits reachable from `to` but not from `from` (`from..to`), newest first. */
+export async function commitsBetween(repo: Repo, from: string | null, to: string, max = 20): Promise<CommitInfo[]> {
+  const range = from ? `${from}..${to}` : to;
+  const { stdout } = await runGit(["log", "-z", `--max-count=${max}`, "--format=%H%x00%s%x00%an%x00%aI", "--end-of-options", range], {
+    cwd: repo.root,
+  });
+  const f = stdout.split("\0");
+  const out: CommitInfo[] = [];
+  for (let i = 0; i + 3 < f.length; i += 4) {
+    out.push({ hash: (f[i] as string).replace(/^\n/, ""), subject: f[i + 1] as string, author: f[i + 2] as string, date: f[i + 3] as string });
+  }
+  return out;
+}
+
+/** Number of commits in `from..to`. */
+export async function countCommits(repo: Repo, from: string | null, to: string): Promise<number> {
+  const range = from ? `${from}..${to}` : to;
+  return Number((await runGit(["rev-list", "--count", "--end-of-options", range], { cwd: repo.root })).stdout.trim());
+}

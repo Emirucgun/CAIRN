@@ -16,6 +16,21 @@ export interface MapOptions {
   all?: boolean;
   /** Max symbols listed per file. */
   maxSymbols?: number;
+  /** Reuse a snapshot already taken (and its blob listing) instead of taking a new one. */
+  from?: SnapshotListing;
+}
+
+export interface SnapshotListing {
+  tree: string;
+  /** Every blob in the tree (ls-tree -r). */
+  blobs: TreeEntry[];
+}
+
+/** Takes a snapshot and lists its blobs, for commands that need both. */
+export async function snapshotListing(ws: Workspace): Promise<SnapshotListing & { head: string | null }> {
+  const snap = await snapshot(ws.repo, { paths: ws.paths });
+  const blobs = (await lsTree(ws.repo, snap.tree, { recursive: true })).filter((e) => e.type === "blob");
+  return { tree: snap.tree, head: snap.head, blobs };
 }
 
 export interface MapFile {
@@ -78,8 +93,8 @@ export async function buildMap(ws: Workspace, opts: MapOptions = {}): Promise<Ma
   const rootPath = toRepoPath(ws.repo, opts.path ?? ".", ws.cwdInRepo);
   if (rootPath === null) throw new PathOutsideRepoError(opts.path ?? ".");
 
-  const snap = await snapshot(ws.repo, { paths: ws.paths });
-  const entries = (await lsTree(ws.repo, snap.tree, { recursive: true })).filter((e) => e.type === "blob");
+  const listing = opts.from ?? (await snapshotListing(ws));
+  const entries = listing.blobs;
   const tree = toDirTree(entries);
 
   // Locate the requested root: a folder, or a single file.
@@ -134,7 +149,7 @@ export async function buildMap(ws: Workspace, opts: MapOptions = {}): Promise<Ma
 
   const root = single ? fileNode(single) : folderNode(rootDir as Dir, 0);
   stats.ms = Math.round(performance.now() - t0);
-  return { root, tree: snap.tree, depth, stats };
+  return { root, tree: listing.tree, depth, stats };
 }
 
 const byPath = (a: { path: string }, b: { path: string }) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);

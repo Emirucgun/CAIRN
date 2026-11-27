@@ -4,6 +4,8 @@ export interface Io {
   env: NodeJS.ProcessEnv;
   out(text: string): void;
   err(text: string): void;
+  /** Resolves once everything written to out() has been handed to the OS. */
+  flush?(): Promise<void>;
 }
 
 export function processIo(): Io {
@@ -12,6 +14,8 @@ export function processIo(): Io {
     env: process.env,
     out: (t) => process.stdout.write(t),
     err: (t) => process.stderr.write(t),
+    flush: () =>
+      new Promise<void>((resolve, reject) => process.stdout.write("", (e) => (e ? reject(e) : resolve()))),
   };
 }
 
