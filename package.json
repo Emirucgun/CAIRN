@@ -1,0 +1,48 @@
+{
+  "name": "@emirucgun/cairn",
+  "version": "0.0.0",
+  "description": "Git-native memory layer that lets any AI coding agent understand a repo in a few thousand tokens.",
+  "license": "MIT",
+  "author": "Emir Ucgun",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Emirucgun/CAIRN.git"
+  },
+  "type": "module",
+  "bin": {
+    "cairn": "bin/cairn"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "cairn": "tsx src/cli/index.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.7",
+    "eslint": "^10.15.0",
+    "fast-check": "^4.11.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.74.0",
+    "vitest": "^5.1.2"
+  },
+  "dependencies": {
+    "commander": "^15.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
