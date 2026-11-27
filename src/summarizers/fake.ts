@@ -13,14 +13,31 @@ export class FakeSummarizer implements Summarizer {
     readonly external = true,
     /** Return an error for prompts this matches. */
     private readonly failWhen: (req: SummaryRequest) => SummarizerError | null = () => null,
+    /** Simulated latency, for concurrency tests. */
+    private readonly delayMs = 0,
   ) {}
+
+  /** Highest number of calls in flight at once. */
+  maxInFlight = 0;
+  private inFlight = 0;
 
   generatorId(promptVersion: number): string {
     return generatorId(this.provider, this.model, promptVersion);
   }
 
-  summarize(req: SummaryRequest): Promise<SummaryResult> {
+  async summarize(req: SummaryRequest): Promise<SummaryResult> {
     this.calls.push(req);
+    this.inFlight++;
+    this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
+    try {
+      if (this.delayMs) await new Promise((r) => setTimeout(r, this.delayMs));
+      return await this.answer(req);
+    } finally {
+      this.inFlight--;
+    }
+  }
+
+  private answer(req: SummaryRequest): Promise<SummaryResult> {
     const err = this.failWhen(req);
     if (err) return Promise.reject(err);
     const subject = /^Path: (.+)$/m.exec(req.prompt)?.[1] ?? "input";
