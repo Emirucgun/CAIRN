@@ -25,7 +25,8 @@
     "test": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "cairn": "tsx src/cli/index.ts"
+    "cairn": "tsx src/cli/index.ts",
+    "perf": "pnpm -s build && tsx scripts/perf.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

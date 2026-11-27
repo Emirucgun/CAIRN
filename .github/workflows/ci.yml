@@ -23,3 +23,23 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
+
+  perf:
+    # v0.1 acceptance: cairn map on 10,000 files, < 5 s cold, < 1 s warm.
+    # Separate job so a slow runner never makes unit tests flaky; it still
+    # fails when a target is missed.
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm perf

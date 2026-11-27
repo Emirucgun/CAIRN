@@ -1,3 +1,4 @@
+import "../v8-flags.js";
 import { processIo } from "./io.js";
 import { main } from "./main.js";
 

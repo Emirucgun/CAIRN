@@ -53,3 +53,12 @@ describe("git exec", () => {
     }
   });
 });
+
+describe("spawn errors", () => {
+  it("reports a missing working directory as such, not as missing git", async () => {
+    const { MissingDirectoryError } = await import("../../src/git/index.js");
+    const err = await runGit(["status"], { cwd: "/nonexistent/cairn-test-dir" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MissingDirectoryError);
+    expect((err as Error).message).toBe("directory does not exist: /nonexistent/cairn-test-dir");
+  });
+});

@@ -16,7 +16,8 @@ export function extractTypeScript(root: Node, src: string): Extracted {
   const exportedNames: string[] = [];
   for (const stmt of namedChildren(root)) statement(c, stmt, stmt, false, "", exportedNames, true);
   c.markExported(exportedNames);
-  collectDynamicImports(c, root);
+  // Walking every node is ~17% of extraction time; most files have no dynamic imports.
+  if (src.includes("require") || src.includes("import(")) collectDynamicImports(c, root);
   return c.result();
 }
 

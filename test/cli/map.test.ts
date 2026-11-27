@@ -164,3 +164,20 @@ describe("cairn map", () => {
     expect((await cli(r.dir, "map")).out).toContain("function f()  L1-1");
   });
 });
+
+describe("cairn map on a large batch", () => {
+  it("parses through the worker pool and matches inline results", async () => {
+    const { POOL_THRESHOLD, INLINE_PARSES } = await import("../../src/core/map.js");
+    const files = Object.fromEntries(
+      Array.from({ length: POOL_THRESHOLD + 20 }, (_, i) => [`f${String(i).padStart(4, "0")}.ts`, `export function f${i}(n: number): number { return n + ${i}; }\n`]),
+    );
+    const r = await initialized(files);
+    guard(r);
+    const m = await mapJson(r.dir);
+    expect(m.stats.parsed).toBe(POOL_THRESHOLD + 20);
+    expect(m.stats.parsed).toBeGreaterThan(INLINE_PARSES); // so the pool really ran
+    const f = find(m.root, "f0123.ts") as MapFile;
+    expect(f.symbols).toEqual([{ sym: "f123", kind: "function", sig: "(n: number): number", lines: [1, 1], exported: true }]);
+    expect((await mapJson(r.dir)).stats).toMatchObject({ parsed: 0, cached: POOL_THRESHOLD + 20 });
+  }, 60_000);
+});

@@ -2,7 +2,8 @@
 // symbols of each file, from the working-tree snapshot. No LLM involved;
 // summaries are added in v0.2.
 import { lsTree, type TreeEntry } from "../git/index.js";
-import { type SkeletonResult, type SkipReason, skeletonFor } from "./skeleton/index.js";
+import { buildAndStore, type SkeletonDeps, type SkeletonResult, type SkipReason, skeletonFor } from "./skeleton/index.js";
+import { ParsePool } from "./skeleton/pool.js";
 import { snapshot } from "./snapshot.js";
 import type { SkeletonSymbol } from "./types.js";
 import { mapLimit, PathOutsideRepoError, toRepoPath, type Workspace } from "./workspace.js";
@@ -77,6 +78,10 @@ export class PathNotInSnapshotError extends Error {
 
 export const DEFAULT_MAP_DEPTH = 2;
 export const DEFAULT_MAX_SYMBOLS = 40;
+/** Files shown at or above which parsing moves to worker threads. */
+export const POOL_THRESHOLD = 300;
+/** Cache misses parsed inline before the worker pool is started. */
+export const INLINE_PARSES = 32;
 
 interface Dir {
   path: string;
@@ -106,12 +111,28 @@ export async function buildMap(ws: Workspace, opts: MapOptions = {}): Promise<Ma
   const shown = single ? [single] : collectShown(rootDir as Dir, depth);
   const stats = { files: shown.length, parsed: 0, cached: 0, skipped: 0, ms: 0 };
   const results = new Map<string, SkeletonResult>();
-  await mapLimit(shown, 16, async (e) => {
-    const r = await skeletonFor({ path: e.path, hash: e.hash, size: e.size }, ws.skeletonDeps);
-    results.set(e.path, r);
-    if (r.status === "ok") stats[r.cached ? "cached" : "parsed"]++;
-    else stats.skipped++;
-  });
+  // Worker threads only pay off for big batches; they start on the first cache miss.
+  // The first INLINE_PARSES misses parse inline, so an edit or two never pays
+  // for starting workers.
+  const pool = shown.length >= POOL_THRESHOLD ? new ParsePool() : null;
+  let misses = 0;
+  const deps: SkeletonDeps = pool
+    ? {
+        ...ws.skeletonDeps,
+        build: (file, lang, src, created) =>
+          ++misses <= INLINE_PARSES ? buildAndStore(ws.cache, file, lang, src, created) : pool.build(ws.cache.dir, file, lang, src, created),
+      }
+    : ws.skeletonDeps;
+  try {
+    await mapLimit(shown, pool ? 64 : 16, async (e) => {
+      const r = await skeletonFor({ path: e.path, hash: e.hash, size: e.size }, deps);
+      results.set(e.path, r);
+      if (r.status === "ok") stats[r.cached ? "cached" : "parsed"]++;
+      else stats.skipped++;
+    });
+  } finally {
+    await pool?.close();
+  }
 
   const fileNode = (e: TreeEntry): MapFile => {
     const r = results.get(e.path);

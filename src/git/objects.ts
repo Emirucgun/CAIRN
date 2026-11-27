@@ -1,4 +1,5 @@
-import { GitError, runGit, runGitBuffer, spawnGit } from "./exec.js";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { GitError, runGit, runGitBuffer, spawnEnoentError, spawnGit } from "./exec.js";
 import type { Repo } from "./repo.js";
 
 export type ObjectType = "blob" | "tree" | "commit";
@@ -151,7 +152,8 @@ interface Pending {
  * process per blob. Requests are answered in order; call close() when done.
  */
 export class BlobReader {
-  private proc: ReturnType<typeof spawnGit> | null = null;
+  private proc: ChildProcessWithoutNullStreams | null = null;
+  private exited: Promise<void> | null = null;
   private readonly queue: Pending[] = [];
   private buf: Buffer = Buffer.alloc(0);
   private failed: Error | null = null;
@@ -164,29 +166,45 @@ export class BlobReader {
     const proc = this.start();
     return new Promise<Buffer>((resolve, reject) => {
       this.queue.push({ hash, resolve, reject });
-      proc.stdin?.write(`${hash}\n`);
+      proc.stdin.write(`${hash}\n`);
     });
   }
 
+  /** Ends the batch process and waits until it has really exited (killing it after 2 s). */
   async close(): Promise<void> {
     const proc = this.proc;
+    const exited = this.exited;
     this.proc = null;
-    if (!proc) return;
-    proc.stdin?.end();
-    await proc;
+    this.exited = null;
+    if (!proc || !exited) return;
+    proc.stdin.end();
+    const timer = setTimeout(() => proc.kill("SIGKILL"), 2000);
+    try {
+      await exited;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  private start(): ReturnType<typeof spawnGit> {
+  private start(): ChildProcessWithoutNullStreams {
     if (this.proc) return this.proc;
     const proc = spawnGit(["cat-file", "--batch"], { cwd: this.repo.root });
     let stderr = "";
-    proc.stderr?.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
-    proc.stdout?.on("data", (chunk: Buffer) => {
+    proc.stderr.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+    proc.stdout.on("data", (chunk: Buffer) => {
       this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
       this.drain();
     });
-    void proc.then((r) => {
-      if (this.queue.length) this.fail(new GitError(["cat-file", "--batch"], r.exitCode, stderr || "exited early"));
+    proc.stdin.on("error", (e) => this.fail(e));
+    this.exited = new Promise<void>((resolve) => {
+      proc.once("error", (e) => {
+        this.fail((e as NodeJS.ErrnoException).code === "ENOENT" ? spawnEnoentError(this.repo.root) : e);
+        resolve();
+      });
+      proc.once("close", (code) => {
+        if (this.queue.length) this.fail(new GitError(["cat-file", "--batch"], code ?? undefined, stderr || "exited early"));
+        resolve();
+      });
     });
     this.proc = proc;
     return proc;
@@ -217,7 +235,7 @@ export class BlobReader {
   }
 
   private fail(e: Error): void {
-    this.failed = e;
+    this.failed ??= e;
     for (const p of this.queue.splice(0)) p.reject(e);
   }
 }

@@ -48,7 +48,7 @@ export async function main(argv: readonly string[], io: Io): Promise<number> {
     const json = argv.includes("--json");
     const expected = EXPECTED.some((cls) => e instanceof cls);
     const message = (e as Error).message ?? String(e);
-    if (json) io.out(JSON.stringify({ error: { name: (e as Error).name, message } }, null, 2) + "\n");
+    if (json) io.out(JSON.stringify({ error: { name: (e as Error).name, message } }) + "\n");
     io.err(`cairn: ${message}\n`);
     if (!expected && io.env.CAIRN_DEBUG) io.err(`${(e as Error).stack ?? ""}\n`);
     return e instanceof CliError ? e.exitCode : 1;

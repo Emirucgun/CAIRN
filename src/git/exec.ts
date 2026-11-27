@@ -1,5 +1,7 @@
 // The only place CAIRN starts the git binary. Everything else in src/git/
 // builds on runGit(); nothing outside src/git/ calls git directly.
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { execa } from "execa";
 
 export const MIN_GIT_VERSION = [2, 38, 0] as const;
@@ -48,6 +50,18 @@ export class GitError extends Error {
   }
 }
 
+export class MissingDirectoryError extends Error {
+  constructor(readonly dir: string) {
+    super(`directory does not exist: ${dir}`);
+    this.name = "MissingDirectoryError";
+  }
+}
+
+/** ENOENT from spawning git means a missing cwd as often as a missing git binary. */
+export function spawnEnoentError(cwd: string): Error {
+  return existsSync(cwd) ? new GitNotFoundError() : new MissingDirectoryError(cwd);
+}
+
 export class GitNotFoundError extends Error {
   constructor() {
     super("git was not found on PATH. Install git 2.38 or newer: https://git-scm.com/downloads");
@@ -71,19 +85,15 @@ function buildEnv(extra: Record<string, string> | undefined): NodeJS.ProcessEnv 
 
 /**
  * Starts a long-lived git process with piped stdin/stdout (e.g. `cat-file
- * --batch`). Same environment rules as runGit.
+ * --batch`). Same environment rules as runGit. Uses child_process directly:
+ * with execa, awaiting the subprocess could settle before the child exited,
+ * leaving it alive (and the CLI unable to exit) for ~10 s after a large run.
  */
-export function spawnGit(args: readonly string[], opts: Pick<GitOptions, "cwd" | "env">) {
-  return execa("git", ["-c", "core.quotePath=false", ...args], {
+export function spawnGit(args: readonly string[], opts: Pick<GitOptions, "cwd" | "env">): ChildProcessWithoutNullStreams {
+  return spawn("git", ["-c", "core.quotePath=false", ...args], {
     cwd: opts.cwd,
     env: buildEnv(opts.env),
-    extendEnv: false,
-    reject: false,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    encoding: "buffer",
-    buffer: false,
+    stdio: ["pipe", "pipe", "pipe"],
   });
 }
 
@@ -102,7 +112,7 @@ async function run(
     encoding,
     ...(opts.input !== undefined ? { input: opts.input } : { stdin: "ignore" as const }),
   });
-  if ((result as { code?: string }).code === "ENOENT") throw new GitNotFoundError();
+  if ((result as { code?: string }).code === "ENOENT") throw spawnEnoentError(opts.cwd);
   const exitCode = result.exitCode;
   const stderr = typeof result.stderr === "string" ? result.stderr : Buffer.from(result.stderr).toString("utf8");
   if (exitCode === undefined || (exitCode !== 0 && !(opts.okExitCodes ?? []).includes(exitCode))) {
