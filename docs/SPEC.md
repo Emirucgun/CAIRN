@@ -61,7 +61,7 @@ Principles, in priority order when they conflict:
 2. **Git-native, zero lock-in.** Works in any git repo, changes nothing about how git is used, and `rm -rf .cairn` fully uninstalls it.
 3. **Agent-neutral.** Every feature works through MCP and the CLI; agent-specific adapters only add automatic capture.
 4. **Useful with no AI.** Skeletons, maps and context diffs work without any LLM. Summaries are an optional upgrade.
-5. **Local and private by default.** No server, no telemetry. LLM calls default to a local model.
+5. **No AI by default; bring your own key.** No server, no telemetry, and no LLM calls unless the user configures a summarizer with their own API key. Nothing is sent to an external API without per-repo consent and a cost estimate the user confirms.
 6. **Measured.** Every feature that claims to save tokens reports how many it saved.
 
 Non-goals (do not build these):
@@ -97,6 +97,7 @@ repo/
 │   ├── config.toml
 │   ├── cache/<2 hex>/<62 hex>.json   # skeleton + summary entries
 │   ├── sessions/<agent-id>.json      # session cursors
+│   ├── consent.json                  # per-repo consent to send code to an external API (v0.2)
 │   ├── tmp-index                     # scratch index for snapshots
 │   └── stats.jsonl                   # token accounting log
 └── .cairnignore                  # extra exclusions (gitignore syntax)
@@ -143,14 +144,14 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
 - `object_kind`: `blob` (file) or `tree` (folder).
 - `git_object_hash`: the hash git itself assigns (`git rev-parse <rev>:<path>`, or from a snapshot tree).
 - `layer`: `skeleton` or `summary`.
-- `generator_id`: for skeletons `ts:<grammar-version>`; for summaries `<provider>/<model>@p<prompt-version>`.
+- `generator_id`: for file skeletons `ts:<lang>@<grammar-pkg-version>+x<extractor-version>` (e.g. `ts:typescript@0.1.13+x1`), so a grammar or extraction-query change, or the same bytes parsed as a different language, gets a new key; for folder skeletons `ts-dir@<grammar-pkg-version>+x<extractor-version>`; for summaries `<provider>/<model>@p<prompt-version>`.
 - Stored at `.cairn/cache/<key[0:2]>/<key[2:]>.json`. Same content at two paths shares one entry.
 
 ### Cache entry
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "key": "5e1b…",
   "object": { "kind": "blob", "hash": "9f2c4e…" },
   "layer": "summary",
@@ -159,16 +160,35 @@ cache_key = sha256( object_kind + ":" + git_object_hash + ":" + layer + ":" + ge
   "skeleton": [
     { "sym": "login", "kind": "function", "sig": "(email: string, pw: string) => Promise<Session>", "lines": [12, 48], "exported": true }
   ],
-  "imports": ["src/lib/supabase.ts"],
+  "imports": ["../lib/supabase"],
   "summary": "Creates and refreshes user sessions via Supabase auth. Throws AuthError on invalid credentials.",
   "children": null,
+  "files": null,
   "tokens": { "source": 4210, "skeleton": 180, "summary": 45 },
-  "generator": "ollama/qwen2.5-coder:7b@p3",
+  "generator": "anthropic/claude-haiku-5-5@p3",
   "created": "2026-11-27T08:20:00Z"
 }
 ```
 
+`imports` holds raw import specifiers exactly as written in the source. Entries are keyed by content, not path, so resolving specifiers to repo paths happens when a command reads the entry, using the path it is being read for. `tokens.source` and `tokens.skeleton` are fast `chars / 4` estimates (exact tokenization of 10,000 typical skeletons took about 5 s, the whole cold-map budget); `tokens.summary` and every count of text CAIRN actually serves use `js-tiktoken`.
+
+Fields that don't apply to an entry are `null`, never omitted. A `skeleton`-layer entry has `summary: null` and `tokens.summary: null`; a `summary`-layer entry carries the skeleton it was built from. For `tree` entries, `tokens.source` is the sum over its children.
+
 For `tree` entries, `skeleton` is null and `children` lists `{ "name", "kind", "hash" }` for each child, so a folder summary can be traced to exactly the child content it was built from.
+
+**Folder skeletons** (schema 2). A `tree`-layer `skeleton` entry holds the skeletons of the folder's *direct* files, so `cairn map` reads one entry per folder it shows instead of one per file (on a 10,000-file repo, ~350 reads instead of 9,000; per-file reads cost ~2 s on CI macOS). It is keyed by the folder's tree hash with generator `ts-dir@…`, lists `children` as above, and has `files`: one item per direct file in a supported language, sorted by name. Subfolders are not included; they have their own entries.
+
+```json
+"files": [
+  { "name": "session.ts", "hash": "9f2c4e…", "lang": "typescript",
+    "skeleton": [ … ], "imports": ["../lib/supabase"],
+    "tokens": { "source": 4210, "skeleton": 180 }, "skipped": null }
+]
+```
+
+`skipped` is `"too-large"`, `"binary"` or `"secret"` when a file gets no skeleton (then `skeleton` and `imports` are null); the matched text of a secret is never stored. `files` is `null` on every other entry. A change anywhere below a folder changes its tree hash, so an edit rebuilds the entries of the edited file's folder and its ancestors; files in those folders are re-parsed unless a per-file entry for their blob exists. Per-file (`blob`) entries remain for `cairn read` and `cairn context`.
+
+Schema 1 entries are migrated on read by adding `files: null`.
 
 ### Session cursor
 
@@ -184,6 +204,8 @@ For `tree` entries, `skeleton` is null and `children` lists `{ "name", "kind", "
   "active_task": "rec_01JDX…"
 }
 ```
+
+`last_head` is `null` in a repo with no commits, and `active_task` is `null` when no task is active. The agent id becomes a file name, so it must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
 
 ### Records (why-notes and lifecycle)
 
@@ -232,6 +254,8 @@ GIT_INDEX_FILE=.cairn/tmp-index git write-tree       # → snapshot tree hash
 ```
 
 - Then apply `.cairnignore` by removing matching paths from the tmp index before `write-tree`.
+- In practice `read-tree --reset HEAD` is used: same resulting index, but it keeps cached stat info for unchanged files so `add -A` only rehashes what changed. (`-m` would too, but refuses with "not uptodate" when a scratch-index entry differs from both HEAD and the work tree.) Name-based built-in denies are passed to `add` as exclude pathspecs so untracked secrets are never hashed into `.git/objects`; tracked denied files are removed from the tmp index like `.cairnignore` matches.
+- CAIRN's own lock is `.cairn/snapshot.lock` (git itself uses `tmp-index.lock` while writing the tmp index).
 - Must never modify `.git/index`, `HEAD`, or any ref other than `refs/notes/cairn`.
 - Target: under 300 ms on a 10,000-file repo after the first run (git's stat cache does the work).
 
@@ -246,7 +270,7 @@ GIT_INDEX_FILE=.cairn/tmp-index git write-tree       # → snapshot tree hash
 
 Cost of one edited file at depth d: 1 file summary + d folder summaries, independent of repo size.
 
-Summaries run with bounded concurrency (default 4) and a hard per-run cap on LLM calls (default 200) that the CLI shows before starting large jobs.
+Summaries run with bounded concurrency (default 4) and a hard per-run cap on LLM calls (default 200). Before **any** summarize run that would make at least one call, the CLI shows the number of files, the estimated input and output tokens and the estimated cost, and asks for confirmation (see §Summarizer: bring your own key).
 
 ### 3. Context since last session
 
@@ -320,7 +344,7 @@ The next agent's `cairn context` includes the latest handoff automatically. The 
 
 ### Identity and tokens
 
-- Agent id comes from the adapter, the `CAIRN_AGENT` env var, or `--agent`.
+- Agent id comes from `--agent`, the `CAIRN_AGENT` env var, or the adapter; with none of these it is `default`, and output includes a one-line hint to set one.
 - `author.model` is filled when the agent reports it.
 - Budgets are converted per model with a factor table in config (default 1.0 for the tiktoken estimate), because tokenizers differ.
 
@@ -336,7 +360,7 @@ The CLI and MCP server call the same core functions; every MCP tool has a CLI eq
 | `cairn map [path] [--depth n]` | Tree of folders with skeleton names, plus summaries when available | v0.1 |
 | `cairn context` | Changes since this agent's last session, plus repo map and records | v0.1 |
 | `cairn read <path>[#symbol]` | One symbol's source by line range, or the whole file | v0.1 |
-| `cairn summarize [path]` | Build or refresh summaries for a path; shows LLM-call count first | v0.2 |
+| `cairn summarize [path]` | Build or refresh summaries for a path; shows files, estimated tokens and cost first, and asks to confirm | v0.2 |
 | `cairn stats [--since 7d]` | Tokens served vs. estimated full-read tokens | v0.2 |
 | `cairn note "<intent>" [--decision …] [--rejected …]` | Attach a decision record to HEAD | v0.3 |
 | `cairn why <path>` | Decision history for a path, newest first | v0.3 |
@@ -370,8 +394,10 @@ Every MCP response ends with a one-line footer such as `cairn: served 2,140 toke
 
 ```toml
 [summarizer]
-provider = "ollama"            # ollama | anthropic | openai-compatible | off
-model = "qwen2.5-coder:7b"
+provider = "off"               # off | anthropic | openai-compatible | ollama
+# model = "claude-haiku-5-5"   # required when provider is not off; no default
+# base_url = "https://api.openai.com/v1"   # openai-compatible and ollama only
+# api_key_env = "OPENAI_API_KEY"           # name of the env var holding the key
 max_calls_per_run = 200
 concurrency = 4
 
@@ -381,7 +407,26 @@ max_diff_lines = 150
 [models.factors]               # tokenizer correction per model family
 "claude" = 1.0
 "gpt" = 1.0
+
+[records]
+store_prompts = true           # false drops prompts from records (refs/notes/cairn is pushed with the repo)
 ```
+
+### Summarizer: bring your own key
+
+Summaries are off until the user turns them on. CAIRN ships no model and has no default model. The providers are implemented in v0.2; v0.1 only accepts and validates these settings.
+
+| Provider | Endpoint | Key from |
+| --- | --- | --- |
+| `anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` |
+| `openai-compatible` | `base_url` (default `https://api.openai.com/v1`); any server speaking the OpenAI chat completions API | the env var named by `api_key_env` (default `OPENAI_API_KEY`) |
+| `ollama` (optional) | `base_url` (default `http://127.0.0.1:11434`) | none |
+
+- **Keys only from environment variables.** `config.toml` never holds a key: any key-like setting there (`api_key`, `key`, `token`, `secret`) is a config error that says which env var to set instead. Keys are never written to `.cairn/`, records, logs or `stats.jsonl`.
+- **Consent once per repo.** The first summarize run in a repo that would send code to an external API asks: "Send source from this repo to <provider> at <host>? [y/N]". The answer, provider and host are stored in `.cairn/consent.json` (schema 1). Changing the provider or host asks again. Deleting `.cairn/` revokes it. An `ollama` or `openai-compatible` URL on `localhost`/`127.0.0.1`/`::1` is not external and needs no consent.
+- **Estimate and confirm every run.** Before making calls, `cairn summarize` prints the files to summarize, estimated input and output tokens and estimated cost (USD, from a built-in price table for known models, or `price_input_per_mtok` / `price_output_per_mtok` in `[summarizer]`; "cost unknown" otherwise), then asks to confirm. `--yes` confirms the run in scripts but never grants consent.
+- **Non-interactive callers can't consent.** Without a TTY (agents, the MCP server, CI), a run that lacks consent fails with a message saying to run `cairn summarize` once in a terminal. The MCP server never starts summarization by itself.
+- All other rules in §Security (ignore rules, built-in denies, secret scan) apply before anything is sent.
 
 ## Dashboard (`cairn ui`)
 
@@ -415,12 +460,13 @@ Lifecycle features are thin commands that write and read records; they add no ne
 
 ## Security, privacy and failure modes
 
-Nothing leaves the machine unless the user configures a cloud summarizer, and even then secrets and ignored files are never sent.
+Nothing leaves the machine unless the user configures a summarizer with their own key and consents for the repo, and even then secrets and ignored files are never sent.
 
 ### Rules
 
-- Never index or summarize anything git ignores, anything in `.cairnignore`, or built-in denies: `.env*`, `*.pem`, `*.key`, `id_*`, `*.p12`, `secrets.*`, files over 1 MB, and binaries.
-- Before any summarizer call, scan content for common secret patterns (API keys, private key headers, connection strings). On a hit, skip the file and log a warning without the matched text.
+- Never index or summarize anything git ignores, anything in `.cairnignore`, or built-in denies: `.env*`, `*.pem`, `*.key`, `*.p12`, `secrets.*`, the SSH key files `id_rsa`, `id_dsa`, `id_ecdsa` and `id_ed25519` (each also with `.pub` and `-cert.pub` suffixes), files over 1 MB, and binaries. Name-based denies match at any depth.
+- Content beats file names: any file whose content contains a private key header (`-----BEGIN … PRIVATE KEY-----`, including OpenSSH, RSA, EC, DSA, encrypted and PGP private key blocks) is never skeletoned, cached or summarized, whatever it is called. This scan runs before skeleton extraction from v0.1 on.
+- Before any summarizer call, also scan content for other common secret patterns (API keys, connection strings). On a hit, skip the file and log a warning without the matched text.
 - Records may contain prompts. `cairn note --no-prompt` and the config flag `records.store_prompts = false` drop them. Warn the user once that `refs/notes/cairn` is pushed with the repo.
 - The MCP server is read-only except `cairn_note` and `cairn_handoff`, which only write records.
 - The dashboard binds to `127.0.0.1` only.
@@ -477,9 +523,9 @@ Six milestones, each shippable on its own; a milestone is done only when every b
 
 ### v0.2 — Summaries
 
-- [ ] Summarizer interface with Ollama and Anthropic providers plus a fake provider for tests
+- [ ] Summarizer interface with Anthropic and OpenAI-compatible (configurable base URL) providers, optional Ollama, plus a fake provider for tests; keys only from env vars
 - [ ] Lazy bottom-up file and folder summaries keyed by content hash and generator id
-- [ ] LLM-call cap and confirmation prompt for large runs
+- [ ] LLM-call cap; file count, token and cost estimate with confirmation before every run; per-repo consent for external APIs
 - [ ] Secret scan before every summarizer call
 - [ ] `cairn stats` reads `stats.jsonl`
 - [ ] Editing one file at depth 3 triggers exactly 4 summary calls
@@ -515,9 +561,15 @@ Six milestones, each shippable on its own; a milestone is done only when every b
 
 Decide these before the milestone that needs them; Claude Code adds new ones here instead of guessing.
 
-- [ ] Is the name CAIRN free on npm, GitHub and a domain? (before v0.1)
-- [ ] License: MIT, or Apache-2.0 for the patent grant? (before v0.1)
-- [ ] Default local model for summaries, chosen after testing 2–3 small coding models on quality vs. speed (before v0.2)
+- [x] Is the name CAIRN free on npm, GitHub and a domain? (before v0.1) — **npm package `@emirucgun/cairn`, CLI command stays `cairn`** (decided 2026-11-27)
+  - GitHub: free (repo `Emirucgun/CAIRN`). npm: unscoped `cairn` is taken, as are `cairn-cli`, `cairn-ai`, `cairn-mcp`, `cairn-memory`, `cairn-dev` and `cairnkit`, so we publish scoped. Install: `npm i -g @emirucgun/cairn`. Domain: not checked yet.
+- [x] License: MIT, or Apache-2.0 for the patent grant? (before v0.1) — **MIT** (decided 2026-11-27; see `LICENSE`)
+- [x] Cache entry `imports`: the cache is keyed by blob hash (path-independent), but resolved import paths depend on the file's location. Store raw specifiers and resolve at read time? (before v0.1, see docs/plans/v0.1.md Q1) — **Raw specifiers, resolved at read time** (decided 2026-11-27)
+- [x] Skeleton `generator_id`: include language and extractor version, e.g. `ts:typescript@0.1.13+x1`, so query changes and .ts/.js differences invalidate the cache? (before v0.1, Q2) — **Yes, `ts:<lang>@<grammar-pkg-version>+x<extractor-version>`** (decided 2026-11-27)
+- [x] Token counting: tiktoken over every source file is too slow for a cold 10k-file map. Use a chars/4 estimate for `tokens.source` and exact counts only for served text? (before v0.1, Q3) — **Yes: chars/4 for `tokens.source`, exact tiktoken for served text** (decided 2026-11-27); amended during v0.1 step 6: `tokens.skeleton` is also chars/4, after measuring tiktoken at ~5 s per 10k skeletons (confirmed 2026-11-27)
+- [x] Default agent id when no `--agent`, `CAIRN_AGENT` or adapter is present: `default`? (before v0.1, Q4) — **`default`, with a hint** (decided 2026-11-27)
+- [x] Default local model for summaries, chosen after testing 2–3 small coding models on quality vs. speed (before v0.2) — **No default model: summaries are BYOK and off by default** (decided 2026-11-27; see §Summarizer: bring your own key)
 - [ ] Should summaries be shareable (pushed in a ref) so a team builds the cache once, or stay local? (before v0.3)
 - [ ] Should prompts be stored in records by default, given they are pushed with the repo? (before v0.3)
+- [ ] Records live in git notes attached to commits, but squash and rebase merges replace branch commits with new ones, which orphans the notes on them (GitHub's squash-merge is the common case). How should records survive? Options to weigh: re-attach notes on rewrite (`notes.rewriteRef` covers local `git rebase`/`commit --amend`, but not merges done on GitHub); attach records to a stable anchor instead of branch commits (e.g. the merge base, or a dedicated `refs/notes/cairn` commit-independent store keyed by record id and linked to commits only by `links.commits`); or a `cairn notes repair` that finds orphaned records after a pull and re-attaches them by matching patch-ids or `links.paths`. (before v0.3)
 - [ ] Pricing or sponsorship model, if any, after the first public release
