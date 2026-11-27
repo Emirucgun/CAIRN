@@ -139,6 +139,45 @@ describe("snapshot", () => {
     expect(r.git("cat-file", "-p", `${s.tree}:a.ts`)).toBe("staged then edited\n");
   });
 
+  it("keeps working when a file staged by one snapshot is then edited, committed and edited again", async () => {
+    // Regression: read-tree -m refused this ("not uptodate. Cannot merge").
+    const r = init(makeRepo({ "a.ts": "1\n" }));
+    const repo = await openRepo(r.dir);
+    r.write("a.ts", "A\n");
+    await snapshot(repo); // scratch index now holds A
+    r.write("a.ts", "B\n");
+    r.git("commit", "-q", "-am", "B"); // HEAD holds B
+    r.write("a.ts", "C\n"); // work tree holds C
+    guard(r);
+    const s = await snapshot(repo);
+    expect(r.git("cat-file", "-p", `${s.tree}:a.ts`)).toBe("C\n");
+  });
+
+  it("matches the work tree across a sequence of edits, commits, deletions and resets", async () => {
+    const r = init(makeRepo({ "a.ts": "0\n", "b.ts": "b\n" }));
+    const repo = await openRepo(r.dir);
+    const steps: (() => void)[] = [
+      () => r.write("a.ts", "1\n"),
+      () => r.git("commit", "-q", "-am", "1"),
+      () => r.write("c.ts", "c\n"),
+      () => r.remove("b.ts"),
+      () => (r.git("add", "-A", "--", ".", ":(exclude).cairn"), r.git("commit", "-q", "-m", "2")),
+      () => r.write("a.ts", "3\n"),
+      () => r.git("reset", "-q", "--hard", "HEAD~1"),
+      () => r.write("a.ts", "4\n"),
+      () => r.git("stash", "-q"),
+      () => r.git("stash", "pop", "-q"),
+    ];
+    for (const step of steps) {
+      step();
+      const s = await snapshot(repo);
+      r.git("add", "-A", "--", ".", ":(exclude).cairn");
+      const expected = r.git("write-tree").trim();
+      if (s.tree !== expected) throw new Error(`step ${steps.indexOf(step)}: ${r.git("diff-tree", "-r", "--name-status", expected, s.tree)}`);
+      r.git("reset", "-q"); // unstage again: the fixture's own index must not matter
+    }
+  });
+
   it("handles concurrent snapshots", async () => {
     const r = init(makeRepo({ "a.ts": "a\n" }));
     r.write("b.ts", "b\n");

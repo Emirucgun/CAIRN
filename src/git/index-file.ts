@@ -30,9 +30,12 @@ function envFor(repo: Repo, indexFile: string): Record<string, string> {
 
 export interface ReadTreeOptions {
   /**
-   * Keep cached stat info for entries whose content matches the tree
-   * (`read-tree -m`), so the following `add` only rehashes files that
-   * changed. The resulting index content is the same either way.
+   * Keep cached stat info for entries whose content matches the tree, so the
+   * following `add` only rehashes files that changed. The resulting index
+   * content is the same either way. Uses `--reset`, not `-m`: `-m` refuses
+   * ("not uptodate. Cannot merge") when an index entry differs from both the
+   * tree and the work tree, e.g. a file staged by one snapshot, then edited
+   * and committed.
    */
   keepStat?: boolean;
 }
@@ -47,7 +50,7 @@ export async function readTreeInto(
   const args =
     treeish === null
       ? ["read-tree", "--empty"]
-      : ["read-tree", ...(opts.keepStat ? ["-m"] : []), "--end-of-options", treeish];
+      : ["read-tree", ...(opts.keepStat ? ["--reset"] : []), "--end-of-options", treeish];
   await runGit(args, { cwd: repo.root, env: envFor(repo, indexFile) });
 }
 
