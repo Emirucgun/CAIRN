@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { Repo } from "../git/index.js";
 
 export const CAIRN_DIR = ".cairn";
@@ -28,4 +28,9 @@ export function cairnPaths(repo: Pick<Repo, "root">): CairnPaths {
     stats: join(dir, "stats.jsonl"),
     cairnignore: join(repo.root, ".cairnignore"),
   };
+}
+
+/** Converts an OS path (relative) to the forward-slash form CAIRN shows and stores. */
+export function toPosix(path: string): string {
+  return sep === "/" ? path : path.split(sep).join("/");
 }

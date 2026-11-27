@@ -1,7 +1,8 @@
 // `cairn init` (SPEC §CLI): create .cairn/, add it to .gitignore, write the
 // default config. Idempotent; never overwrites anything the user has.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative as pathRelative } from "node:path";
+import { toPosix } from "./paths.js";
 import type { Repo } from "../git/index.js";
 import { writeDefaultConfig } from "./config.js";
 import { CAIRN_DIR, cairnPaths } from "./paths.js";
@@ -53,6 +54,7 @@ export async function initRepo(repo: Repo): Promise<InitResult> {
   return { root: repo.root, changed, alreadyInitialized: changed.length === 0 };
 }
 
+/** Repo-relative display path with forward slashes on every OS. */
 function relative(repo: Repo, abs: string): string {
-  return abs.slice(repo.root.length + 1);
+  return toPosix(pathRelative(repo.root, abs));
 }

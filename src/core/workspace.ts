@@ -1,11 +1,11 @@
 // Shared setup for commands that read the repo: repo, config, cache, blob
 // reader, and the warnings they produce. Commands run inside withWorkspace().
 import { access, realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { assertGitVersion, BlobReader, openRepo, type Repo } from "../git/index.js";
 import { Cache } from "./cache.js";
 import { loadConfig } from "./config.js";
-import { type CairnPaths, cairnPaths } from "./paths.js";
+import { type CairnPaths, cairnPaths, toPosix } from "./paths.js";
 import type { SkeletonDeps } from "./skeleton/index.js";
 import { NotInitializedError } from "./snapshot.js";
 import type { Config } from "./types.js";
@@ -34,7 +34,7 @@ export async function withWorkspace<T>(cwd: string, fn: (ws: Workspace) => Promi
   }
   const config = await loadConfig(paths.config);
   const warnings: string[] = [];
-  const cache = new Cache(paths.cache, (c) => warnings.push(`rebuilt corrupt cache entry ${relative(repo.root, c.path)} (${c.reason})`));
+  const cache = new Cache(paths.cache, (c) => warnings.push(`rebuilt corrupt cache entry ${toPosix(relative(repo.root, c.path))} (${c.reason})`));
   const blobs = new BlobReader(repo);
   const skeletonDeps: SkeletonDeps = {
     cache,
@@ -65,7 +65,7 @@ export function toRepoPath(repo: Repo, input: string, fromDir: string): string |
   const abs = isAbsolute(input) ? input : resolve(repo.root, fromDir, input);
   const rel = relative(repo.root, abs);
   if (rel.startsWith("..") || isAbsolute(rel)) return null;
-  return rel.split(sep).join("/");
+  return toPosix(rel);
 }
 
 /** Runs `fn` over items with at most `limit` in flight, preserving order. */
