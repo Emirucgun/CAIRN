@@ -67,7 +67,7 @@ describe("scratch index", () => {
     await expect(readTreeInto(repo, ".git/index", null)).rejects.toBeInstanceOf(UserIndexError);
     await expect(addAllInto(repo, join(r.dir, ".git", "index"))).rejects.toBeInstanceOf(UserIndexError);
     // Same file through a symlinked path (macOS tmpdir is /var -> /private/var).
-    symlinkSync(join(r.dir, ".git"), join(r.dir, "gitlink"));
+    symlinkSync(join(r.dir, ".git"), join(r.dir, "gitlink"), process.platform === "win32" ? "junction" : "dir");
     await expect(writeTreeFrom(repo, join(r.dir, "gitlink", "index"))).rejects.toBeInstanceOf(UserIndexError);
   });
 });

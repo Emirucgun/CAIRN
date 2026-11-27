@@ -1,8 +1,9 @@
 // Session cursors (SPEC §Session cursor): .cairn/sessions/<agent>.json, one
 // per agent identity, written atomically.
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { renameWithRetry } from "./fsutil.js";
 import { AgentId, AGENT_ID_PATTERN, InvalidFormatError, parseVersioned, SCHEMA, SchemaTooNewError, SessionCursor } from "./types.js";
 
 export const DEFAULT_AGENT = "default";
@@ -61,5 +62,5 @@ export async function writeCursor(sessionsDir: string, cursor: SessionCursor): P
   const path = join(sessionsDir, `${valid.agent}.json`);
   const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   await writeFile(tmp, JSON.stringify(valid, null, 2) + "\n");
-  await rename(tmp, path);
+  renameWithRetry(tmp, path);
 }

@@ -108,7 +108,9 @@ export async function readTarget(ws: Workspace, target: string): Promise<ReadRes
   if (!verdict.ok && verdict.reason === "binary") throw new UnreadableFileError(path, "it is a binary file");
 
   const text = content.toString("utf8");
-  const allLines = text.split("\n");
+  // Blobs normally hold LF (git's clean filter converts CRLF with autocrlf),
+  // but a repo without autocrlf can store CRLF: don't serve stray \r.
+  const allLines = text.split(/\r?\n/);
   if (allLines.length > 1 && allLines[allLines.length - 1] === "") allLines.pop();
   const totalLines = allLines.length;
 

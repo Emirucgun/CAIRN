@@ -5,7 +5,7 @@ import { afterEach } from "vitest";
 
 const dirs: string[] = [];
 afterEach(() => {
-  while (dirs.length) rmSync(dirs.pop() as string, { recursive: true, force: true });
+  while (dirs.length) rmSync(dirs.pop() as string, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 /** A temp directory removed after the current test. */

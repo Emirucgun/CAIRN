@@ -18,7 +18,7 @@ export interface TempRepo {
 const created: string[] = [];
 
 afterEach(() => {
-  while (created.length) rmSync(created.pop() as string, { recursive: true, force: true });
+  while (created.length) rmSync(created.pop() as string, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const fixtureEnv = {
@@ -54,7 +54,7 @@ export function makeRepo(files: Record<string, string> = {}, opts: { commit?: bo
       writeFileSync(abs, content);
     },
     remove(path) {
-      rmSync(join(dir, path), { recursive: true, force: true });
+      rmSync(join(dir, path), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
     commit(message = "commit") {
       git("add", "-A");

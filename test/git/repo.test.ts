@@ -9,8 +9,8 @@ describe("repo", () => {
   it("opens from a subdirectory", async () => {
     const r = makeRepo({ "src/a.ts": "x" });
     const repo = await openRepo(join(r.dir, "src"));
-    expect(repo.root).toBe(realpathSync(r.dir));
-    expect(repo.gitDir).toBe(join(realpathSync(r.dir), ".git"));
+    expect(repo.root).toBe(realpathSync.native(r.dir));
+    expect(repo.gitDir).toBe(join(realpathSync.native(r.dir), ".git"));
     expect(repo.commonDir).toBe(repo.gitDir);
     expect(repo.objectFormat).toBe("sha1");
   });

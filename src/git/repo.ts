@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { GitError, runGit } from "./exec.js";
 
 /** A git repository CAIRN works on, located from a directory inside its work tree. */
@@ -33,7 +34,20 @@ export async function openRepo(dir: string): Promise<Repo> {
   }
   const [root, gitDir, commonDir, format] = out.split("\n");
   if (!root || !gitDir || !commonDir) throw new NotARepoError(dir);
-  return { root, gitDir, commonDir, objectFormat: format === "sha256" ? "sha256" : "sha1" };
+  return { root: canonical(root), gitDir: canonical(gitDir), commonDir: canonical(commonDir), objectFormat: format === "sha256" ? "sha256" : "sha1" };
+}
+
+/**
+ * Native, symlink-free, long-name form of a path. On Windows git prints
+ * C:/… paths and may keep 8.3 short names (C:/Users/RUNNER~1/…), while Node
+ * gives C:\… long names; mixing them makes relative paths go wrong.
+ */
+function canonical(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
 }
 
 /** Resolves a revision to an object hash, or null if it does not exist. */

@@ -15,11 +15,14 @@ export class UserIndexError extends Error {
 
 /** Canonical path, resolving symlinks in the directory even if the file itself doesn't exist yet. */
 function canonical(path: string): string {
+  let out: string;
   try {
-    return resolve(realpathSync(dirname(path)), basename(path));
+    out = resolve(realpathSync.native(dirname(path)), basename(path));
   } catch {
-    return path;
+    out = resolve(path);
   }
+  // Windows paths are case-insensitive (C:\ vs c:\, Index vs index).
+  return process.platform === "win32" ? out.toLowerCase() : out;
 }
 
 function envFor(repo: Repo, indexFile: string): Record<string, string> {

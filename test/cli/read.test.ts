@@ -151,3 +151,27 @@ describe("read helpers", () => {
     expect(numberLines("a\nb\n", 9)).toBe(" 9 | a\n10 | b\n");
   });
 });
+
+describe("cairn read with CRLF content", () => {
+  it("serves lines without \\r when the blob itself holds CRLF", async () => {
+    const r = makeRepo({});
+    r.git("config", "core.autocrlf", "false");
+    r.write("win.ts", "/** Doc. */\r\nexport function f(a: number): number {\r\n  return a;\r\n}\r\n");
+    r.commit("crlf");
+    await cli(r.dir, "init");
+    const j = (await cli(r.dir, "--json", "read", "win.ts#f")).json() as ReadResult;
+    expect(j.lines).toEqual([1, 4]);
+    expect(j.source).toBe("/** Doc. */\nexport function f(a: number): number {\n  return a;\n}\n");
+    expect(j.symbol?.sig).toBe("(a: number): number");
+  });
+
+  it("matches what git stores when autocrlf converts a CRLF work tree to LF", async () => {
+    const r = makeRepo({});
+    r.git("config", "core.autocrlf", "true");
+    r.write("win.ts", "export function g(): void {\r\n}\r\n");
+    await cli(r.dir, "init");
+    const j = (await cli(r.dir, "--json", "read", "win.ts#g")).json() as ReadResult;
+    expect(j.source).toBe("export function g(): void {\n}\n");
+    expect(j.hash).toBe(r.git("hash-object", "win.ts").trim());
+  });
+});

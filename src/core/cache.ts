@@ -4,9 +4,10 @@
 import { createHash, randomBytes } from "node:crypto";
 // File I/O here is synchronous on purpose: entries are small, and sync reads
 // measured ~16x faster than fs/promises for 9,000 of them (no thread-pool hop).
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { renameWithRetry } from "./fsutil.js";
 import { CACHE_ENTRY_MIGRATIONS, CacheEntry, InvalidFormatError, type Layer, type ObjectKind, parseVersioned, SCHEMA, SchemaTooNewError } from "./types.js";
 
 export interface KeyParts {
@@ -91,7 +92,7 @@ export class Cache {
     }
     const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
     writeFileSync(tmp, JSON.stringify(valid) + "\n");
-    renameSync(tmp, path);
+    renameWithRetry(tmp, path);
   }
 
   /** Checks every entry. With `fix`, deletes corrupt ones and stray temp files. */
