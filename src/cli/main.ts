@@ -1,15 +1,18 @@
 import { Command, CommanderError } from "commander";
 import { ConfigError } from "../core/config.js";
+import { PathNotInSnapshotError } from "../core/map.js";
 import { NotInitializedError } from "../core/snapshot.js";
+import { PathOutsideRepoError } from "../core/workspace.js";
 import { InvalidFormatError, SchemaTooNewError } from "../core/types.js";
 import { GitNotFoundError, GitTooOldError, NotARepoError } from "../git/index.js";
 import { VERSION } from "../version.js";
 import { registerDoctor } from "./doctor.js";
 import { registerInit } from "./init.js";
+import { registerMap } from "./map.js";
 import { CliError, type Io } from "./io.js";
 
 /** Errors whose message already tells the user what to do. */
-const EXPECTED = [CliError, NotARepoError, GitTooOldError, GitNotFoundError, NotInitializedError, ConfigError, SchemaTooNewError, InvalidFormatError];
+const EXPECTED = [CliError, NotARepoError, GitTooOldError, GitNotFoundError, NotInitializedError, ConfigError, SchemaTooNewError, InvalidFormatError, PathNotInSnapshotError, PathOutsideRepoError];
 
 export function buildProgram(io: Io): Command {
   const program = new Command()
@@ -22,6 +25,7 @@ export function buildProgram(io: Io): Command {
     .configureOutput({ writeOut: (s) => io.out(s), writeErr: (s) => io.err(s) });
   registerInit(program, io);
   registerDoctor(program, io);
+  registerMap(program, io);
   for (const cmd of program.commands) cmd.exitOverride();
   return program;
 }
