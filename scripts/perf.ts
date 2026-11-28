@@ -30,9 +30,11 @@ const COLD_LIMIT_MS = 5_000;
 const WARM_LIMIT_MS = 1_000;
 /** Fixture build time on a normal ubuntu-latest runner (measured 0.9-1.0 s). */
 const REFERENCE_FIXTURE_MS = 1_000;
-/** cpuWorkload() median on a normal ubuntu-latest runner (first estimate: 120 ms on a
- * dev box that runs cold 1.38x faster than such a runner; refined from CI logs). */
-const REFERENCE_CPU_MS = 170;
+/**
+ * cpuWorkload() median on a normal ubuntu-latest runner: measured 108 ms and
+ * 135 ms on two normal runners (cold 3.04 s and 3.92 s), 2026-11-28.
+ */
+const REFERENCE_CPU_MS = 125;
 const MAX_SCALE = 2;
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../bin/cairn");
 
