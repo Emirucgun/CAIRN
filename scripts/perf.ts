@@ -6,6 +6,13 @@
 //   pnpm perf            # 10,000 files, fails if a target is missed
 //   pnpm perf -- 2000    # other sizes, for quick local checks
 //   CAIRN_PERF_REPORT_ONLY=1 pnpm perf   # print results, never fail (CI macOS)
+//   CAIRN_PERF_NO_SCALE=1 pnpm perf      # judge on the unscaled limits
+//
+// Runner speed: the limits are scaled by how long building the fixture took
+// (writing the files plus git add and commit, no CAIRN code) against a
+// normal GitHub Linux runner, never below x1 and at most x2 (decided
+// 2026-11-28). Slow runners measured 2.2x slower at building it while CAIRN
+// ran 1.5-1.6x slower, so the cap keeps a real regression from hiding.
 //
 // For profiling: CAIRN_PERF_PROFILE=<dir> writes a V8 CPU profile per run
 // and thread; CAIRN_PERF_KEEP=<dir> builds the fixture there and keeps it;
@@ -19,6 +26,9 @@ import { fileURLToPath } from "node:url";
 const FILES = Number(process.argv[2] ?? 10_000);
 const COLD_LIMIT_MS = 5_000;
 const WARM_LIMIT_MS = 1_000;
+/** Fixture build time on a normal ubuntu-latest runner (measured 0.9-1.0 s). */
+const REFERENCE_FIXTURE_MS = 1_000;
+const MAX_SCALE = 2;
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../bin/cairn");
 
 const env = {
@@ -122,8 +132,16 @@ try {
   git("init", "-q", "-b", "main");
   git("add", "-A");
   git("commit", "-q", "-m", "fixture");
+  // Measured before any CAIRN code runs, so it reflects only the runner.
+  const fixtureMs = Math.round(performance.now() - g0);
   run(dir, ["init"]);
-  console.log(`fixture: ${FILES} files in ${Math.round(performance.now() - g0)} ms (${dir})`);
+  console.log(`fixture: ${FILES} files in ${fixtureMs} ms (${dir})`);
+  const scale = process.env.CAIRN_PERF_NO_SCALE ? 1 : Math.min(MAX_SCALE, Math.max(1, fixtureMs / REFERENCE_FIXTURE_MS));
+  console.log(
+    scale === 1
+      ? "runner speed: normal or faster, limits unscaled"
+      : `runner speed: fixture took ${(fixtureMs / REFERENCE_FIXTURE_MS).toFixed(2)}x the ${REFERENCE_FIXTURE_MS} ms reference, limits x${scale.toFixed(2)}${scale === MAX_SCALE ? " (capped)" : ""}`,
+  );
   if (process.env.CAIRN_PERF_FIXTURE_ONLY) process.exit(0);
 
   // Each gated measurement runs SAMPLES times and is judged on the median:
@@ -149,9 +167,9 @@ try {
   const dflt = run(dir, ["map"]);
 
   const rows = [
-    ["cold, --depth 99", coldRuns, COLD_LIMIT_MS],
-    ["warm, --depth 99", warmRuns, WARM_LIMIT_MS],
-    ["after one edit", editRuns, WARM_LIMIT_MS],
+    ["cold, --depth 99", coldRuns, Math.round(COLD_LIMIT_MS * scale)],
+    ["warm, --depth 99", warmRuns, Math.round(WARM_LIMIT_MS * scale)],
+    ["after one edit", editRuns, Math.round(WARM_LIMIT_MS * scale)],
     ["warm, default depth", [dflt], null],
   ] as const;
   let failed = false;
