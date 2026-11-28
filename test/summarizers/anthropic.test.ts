@@ -88,3 +88,21 @@ describe("Anthropic summarizer (SDK against a mock server)", () => {
     expect(m.requests).toHaveLength(2);
   });
 });
+
+describe("startup cost", () => {
+  it("loads the SDK only on the first request, never at import time", async () => {
+    // Importing the SDK costs ~55 ms; every command would pay it even with
+    // summaries off. Only anthropic.ts may name it, as a type import plus one
+    // dynamic import().
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const files = readdirSync("src", { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts"));
+    const users = files.filter((f) => readFileSync(join("src", f), "utf8").includes("@anthropic-ai/sdk"));
+    expect(users.map((f) => f.replaceAll("\\", "/"))).toEqual(["summarizers/anthropic.ts"]);
+    const src = readFileSync("src/summarizers/anthropic.ts", "utf8");
+    const imports = src.split("\n").filter((l) => l.includes('"@anthropic-ai/sdk"') && !l.trimStart().startsWith("//"));
+    expect(imports).toHaveLength(2);
+    expect(imports.some((l) => l.startsWith("import type Anthropic from"))).toBe(true);
+    expect(imports.some((l) => l.includes('import("@anthropic-ai/sdk")'))).toBe(true);
+  });
+});
