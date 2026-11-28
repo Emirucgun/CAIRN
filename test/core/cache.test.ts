@@ -72,7 +72,7 @@ describe("Cache", () => {
 
   it.each([
     ["json", "{not json"],
-    ["schema", JSON.stringify({ ...skeletonEntry(HASH), schema: 3 })],
+    ["schema", JSON.stringify({ ...skeletonEntry(HASH), schema: 4 })],
     ["invalid", JSON.stringify({ ...skeletonEntry(HASH), tokens: null })],
     ["key-mismatch", JSON.stringify(skeletonEntry("1".repeat(40)))],
   ])("deletes and reports a %s-corrupt entry, then rebuilds", async (reason, body) => {
@@ -123,6 +123,32 @@ describe("Cache", () => {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify(v1));
     expect(await cache.get(parts())).toEqual(skeletonEntry(HASH));
+    expect(reports).toEqual([]);
+  });
+
+  it("migrates a schema 2 folder entry by adding summary: null to each child", async () => {
+    const { cache, reports } = newCache();
+    const TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    const generator = "ts-dir@0.1.13+x1";
+    const p = { kind: "tree" as const, hash: TREE, layer: "skeleton" as const, generator };
+    const v2 = {
+      ...skeletonEntry(TREE),
+      schema: 2,
+      key: cacheKey(p),
+      object: { kind: "tree", hash: TREE },
+      generator,
+      lang: null,
+      skeleton: null,
+      imports: null,
+      children: [{ name: "a.ts", kind: "blob", hash: HASH }],
+      files: [],
+    };
+    const file = cache.pathFor(v2.key);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(v2));
+    const got = await cache.get(p);
+    expect(got?.schema).toBe(3);
+    expect(got?.children).toEqual([{ name: "a.ts", kind: "blob", hash: HASH, summary: null }]);
     expect(reports).toEqual([]);
   });
 

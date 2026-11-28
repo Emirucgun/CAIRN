@@ -28,7 +28,7 @@ describe("CacheEntry", () => {
       skeleton: null,
       imports: null,
       summary: "Auth: sessions and tokens.",
-      children: [{ name: "session.ts", kind: "blob", hash: HASH }],
+      children: [{ name: "session.ts", kind: "blob", hash: HASH, summary: "Logs users in." }],
       files: null,
       tokens: { source: 9000, skeleton: null, summary: 12 },
     };

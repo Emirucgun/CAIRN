@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { DoctorReport } from "../../src/core/doctor.js";
-import { cli } from "../helpers/cli.js";
+import { cli, cliWith } from "../helpers/cli.js";
 import { makeRepo, type TempRepo } from "../helpers/repo.js";
 import { guard } from "../helpers/safety.js";
 
@@ -33,6 +33,8 @@ describe("cairn doctor", () => {
       init: "ok",
       gitignore: "ok",
       config: "ok",
+      summarizer: "ok",
+      consent: "skip",
       grammars: "ok",
       cache: "ok",
       sessions: "ok",
@@ -100,6 +102,88 @@ describe("cairn doctor", () => {
     const { res, status } = await doctor(r);
     expect(res.code).toBe(0);
     expect(status.gitignore).toBe("warn");
+  });
+
+  describe("summarizer", () => {
+    const KEY = "sk-ant-api03-doctor-test-value-0123456789abcdefghij";
+    const noKeys = { ANTHROPIC_API_KEY: undefined, ANTHROPIC_AUTH_TOKEN: undefined, ANTHROPIC_BASE_URL: undefined };
+    async function doctorEnv(r: TempRepo, env: NodeJS.ProcessEnv) {
+      const res = await cliWith({ env }, r.dir, "--json", "doctor");
+      const report = res.json() as DoctorReport;
+      const by = (id: string) => report.checks.find((c) => c.id === id);
+      return { res, report, summarizer: by("summarizer"), consent: by("consent") };
+    }
+    async function anthropicRepo() {
+      const r = await initialized();
+      writeFileSync(join(r.dir, ".cairn/config.toml"), '[summarizer]\nprovider = "anthropic"\nmodel = "claude-haiku-5-5"\n');
+      return r;
+    }
+
+    it("reports summaries off by default", async () => {
+      const r = await initialized();
+      guard(r);
+      const { summarizer, consent } = await doctorEnv(r, noKeys);
+      expect(summarizer).toMatchObject({ status: "ok", message: expect.stringMatching(/^off/) as unknown });
+      expect(consent?.status).toBe("skip");
+    });
+
+    it("warns when the key's env var is missing, naming it", async () => {
+      const r = await anthropicRepo();
+      guard(r);
+      const { res, report, summarizer, consent } = await doctorEnv(r, noKeys);
+      expect(res.code).toBe(0);
+      expect(report.healthy).toBe(true);
+      expect(summarizer?.status).toBe("warn");
+      expect(summarizer?.message).toMatch(/ANTHROPIC_API_KEY/);
+      expect(summarizer?.fix).toMatch(/never read from config\.toml/);
+      expect(consent?.status).toBe("skip");
+    });
+
+    it("says the key is set without ever printing it", async () => {
+      const r = await anthropicRepo();
+      guard(r);
+      const json = await doctorEnv(r, { ...noKeys, ANTHROPIC_API_KEY: KEY });
+      expect(json.summarizer?.status).toBe("ok");
+      expect(json.summarizer?.message).toMatch(/anthropic\/claude-haiku-5-5 at api\.anthropic\.com; key from ANTHROPIC_API_KEY \(set\)/);
+      expect(json.res.out).not.toContain(KEY);
+      expect(json.res.out).not.toContain(KEY.slice(0, 16));
+      const text = await cliWith({ env: { ...noKeys, ANTHROPIC_API_KEY: KEY } }, r.dir, "doctor");
+      expect(text.out + text.err).not.toContain(KEY.slice(0, 16));
+    });
+
+    it("reports consent as not asked, then granted", async () => {
+      const r = await anthropicRepo();
+      guard(r);
+      const env = { ...noKeys, ANTHROPIC_API_KEY: KEY };
+      expect((await doctorEnv(r, env)).consent).toMatchObject({ status: "ok", message: expect.stringMatching(/not asked yet for anthropic at api\.anthropic\.com/) as unknown });
+      writeFileSync(
+        join(r.dir, ".cairn/consent.json"),
+        JSON.stringify({ schema: 1, grants: [{ provider: "anthropic", host: "api.anthropic.com", granted_at: "2026-11-27T00:00:00.000Z" }] }),
+      );
+      expect((await doctorEnv(r, env)).consent).toMatchObject({ status: "ok", message: "granted for anthropic at api.anthropic.com" });
+    });
+
+    it("asks consent again for a different ANTHROPIC_BASE_URL host", async () => {
+      const r = await anthropicRepo();
+      guard(r);
+      writeFileSync(
+        join(r.dir, ".cairn/consent.json"),
+        JSON.stringify({ schema: 1, grants: [{ provider: "anthropic", host: "api.anthropic.com", granted_at: "2026-11-27T00:00:00.000Z" }] }),
+      );
+      const { summarizer, consent } = await doctorEnv(r, { ...noKeys, ANTHROPIC_API_KEY: KEY, ANTHROPIC_BASE_URL: "https://llm-gateway.example.com" });
+      expect(summarizer?.message).toMatch(/at llm-gateway\.example\.com;/);
+      expect(consent?.message).toMatch(/not asked yet for anthropic at llm-gateway\.example\.com/);
+    });
+
+    it("needs no consent for a local server", async () => {
+      const r = await initialized();
+      guard(r);
+      writeFileSync(join(r.dir, ".cairn/config.toml"), '[summarizer]\nprovider = "ollama"\nmodel = "qwen3:8b"\n');
+      const { summarizer, consent } = await doctorEnv(r, noKeys);
+      expect(summarizer?.status).toBe("ok");
+      expect(summarizer?.message).toMatch(/\(local\); no key needed/);
+      expect(consent?.status).toBe("skip");
+    });
   });
 
   it("prints a readable text report", async () => {

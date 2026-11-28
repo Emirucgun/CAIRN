@@ -9,8 +9,9 @@ provider = "off"               # off | anthropic | openai-compatible | ollama (b
 # model = "claude-haiku-5-5"   # required when provider is not off; no default
 # base_url = "https://api.openai.com/v1"   # openai-compatible and ollama only
 # api_key_env = "OPENAI_API_KEY"           # API keys come only from env vars, never this file
-max_calls_per_run = 200
+max_calls_per_run = 200        # a run that needs more is refused before it starts
 concurrency = 4
+source_lines = 200             # lines of source sent with a file's skeleton
 
 [context]
 max_diff_lines = 150

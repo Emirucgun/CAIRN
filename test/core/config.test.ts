@@ -6,7 +6,7 @@ import { Config } from "../../src/core/types.js";
 import { tmpDir } from "../helpers/tmp.js";
 
 const DEFAULTS = {
-  summarizer: { provider: "off", max_calls_per_run: 200, concurrency: 4 },
+  summarizer: { provider: "off", max_calls_per_run: 200, concurrency: 4, source_lines: 200 },
   context: { max_diff_lines: 150 },
   models: { factors: { claude: 1.0, gpt: 1.0 } },
   records: { store_prompts: true },

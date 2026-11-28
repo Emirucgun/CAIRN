@@ -7,7 +7,7 @@ export const GEN = "ts:typescript@0.1.13+x1";
 export function skeletonEntry(hash: string, over: Partial<CacheEntry> = {}): CacheEntry {
   const generator = over.generator ?? GEN;
   return {
-    schema: 2,
+    schema: 3,
     key: cacheKey({ kind: "blob", hash, layer: "skeleton", generator }),
     object: { kind: "blob", hash },
     layer: "skeleton",

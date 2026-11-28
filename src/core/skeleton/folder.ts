@@ -87,9 +87,9 @@ export async function folderSkeleton(folder: FolderInput, deps: SkeletonDeps, no
 
   const children: TreeChild[] = folder.entries
     .filter((e) => e.type === "blob" || e.type === "tree")
-    .map((e) => ({ name: nameOf(e.path), kind: e.type as "blob" | "tree", hash: e.hash }));
+    .map((e) => ({ name: nameOf(e.path), kind: e.type as "blob" | "tree", hash: e.hash, summary: null }));
   const entry: CacheEntry = {
-    schema: 2,
+    schema: 3,
     key: cacheKey(parts),
     object: { kind: "tree", hash: folder.hash },
     layer: "skeleton",

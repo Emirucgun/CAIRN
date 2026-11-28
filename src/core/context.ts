@@ -51,6 +51,12 @@ export interface ContextResult {
   touched: MapResult[];
   /** Session, task and decision records: v0.3. */
   records: [];
+  /**
+   * Estimated tokens of getting the same information by reading files whole:
+   * the whole repo on a first session (the output is a repo map), else the
+   * changed files that still exist.
+   */
+  fullReadTokens: number;
 }
 
 export async function buildContext(ws: Workspace, agent: ResolvedAgent): Promise<ContextResult> {
@@ -78,7 +84,7 @@ export async function buildContext(ws: Workspace, agent: ResolvedAgent): Promise
 
   if (!cursor) {
     const map = await buildMap(ws, { path: ws.repo.root, from: listing });
-    return { ...base, since: null, firstReason, commits: [], commitCount: 0, historyRewritten: false, changes: [], moreChanges: 0, map, touched: [] };
+    return { ...base, since: null, firstReason, commits: [], commitCount: 0, historyRewritten: false, changes: [], moreChanges: 0, map, touched: [], fullReadTokens: map.root.tokens };
   }
 
   const since = { tree: cursor.last_snapshot_tree, head: cursor.last_head, seen: cursor.last_seen, activeTask: cursor.active_task };
@@ -130,6 +136,7 @@ export async function buildContext(ws: Workspace, agent: ResolvedAgent): Promise
     moreChanges: raw.length - changes.length,
     map,
     touched,
+    fullReadTokens: raw.filter((c) => c.status !== "D").reduce((n, c) => n + Math.ceil((sizes.get(c.path)?.size ?? 0) / 4), 0),
   };
 }
 

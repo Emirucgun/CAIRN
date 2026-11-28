@@ -41,7 +41,7 @@ describe("folderSkeleton", () => {
     const first = await folderSkeleton(f, deps, new Date("2026-11-27T08:20:00Z"));
     expect(first).toMatchObject({ cached: false, parsed: 2, reused: 0 });
     expect(first.entry).toMatchObject({
-      schema: 2,
+      schema: 3,
       object: { kind: "tree", hash: f.hash },
       layer: "skeleton",
       generator: folderGenerator(),

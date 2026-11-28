@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 /** Highest `schema` this build knows for each versioned JSON format. */
-export const SCHEMA = { cacheEntry: 2, sessionCursor: 1 } as const;
+export const SCHEMA = { cacheEntry: 3, sessionCursor: 1, consent: 1, stats: 1 } as const;
 
 const gitHash = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "expected a git object hash");
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/, "expected a sha256 hex digest");
@@ -53,7 +53,13 @@ export const SkeletonSymbol = z
   .refine((s) => s.lines[0] <= s.lines[1], { message: "lines must be [start, end] with start <= end" });
 export type SkeletonSymbol = z.infer<typeof SkeletonSymbol>;
 
-export const TreeChild = z.object({ name: z.string().min(1), kind: ObjectKind, hash: gitHash });
+export const TreeChild = z.object({
+  name: z.string().min(1),
+  kind: ObjectKind,
+  hash: gitHash,
+  /** Summary layer only: the child's own summary text (schema 3); null everywhere else. */
+  summary: z.string().nullable(),
+});
 export type TreeChild = z.infer<typeof TreeChild>;
 
 export const SKIP_REASONS = ["too-large", "binary", "secret"] as const;
@@ -100,11 +106,16 @@ export const CacheEntry = z
     const folderSkeleton = e.object.kind === "tree" && e.layer === "skeleton";
     if (folderSkeleton && e.files === null) issue("folder skeleton entries must list files");
     if (!folderSkeleton && e.files !== null) issue("only folder skeleton entries have files");
+    if (e.layer === "skeleton" && e.children?.some((c) => c.summary !== null)) issue("skeleton entries' children have summary: null");
   });
 
-/** Cache entry migrations: schema 1 had no `files` field. */
+/** Cache entry migrations: schema 1 had no `files`; schema 2 children had no `summary`. */
 export const CACHE_ENTRY_MIGRATIONS = {
   1: (d: Record<string, unknown>) => ({ ...d, files: null }),
+  2: (d: Record<string, unknown>) => ({
+    ...d,
+    children: Array.isArray(d.children) ? d.children.map((c: Record<string, unknown>) => ({ ...c, summary: null })) : d.children,
+  }),
 };
 export type CacheEntry = z.infer<typeof CacheEntry>;
 
@@ -120,6 +131,47 @@ export const SessionCursor = z.object({
   active_task: z.string().nullable(),
 });
 export type SessionCursor = z.infer<typeof SessionCursor>;
+
+// -------------------------------------------------------------------- consent
+
+/** `.cairn/consent.json`: per-repo consent to send code to an external API (SPEC §Summarizer). */
+export const ConsentFile = z.object({
+  schema: z.literal(SCHEMA.consent),
+  grants: z.array(z.object({ provider: z.string().min(1), host: z.string().min(1), granted_at: timestamp })),
+});
+export type ConsentFile = z.infer<typeof ConsentFile>;
+
+// ---------------------------------------------------------------- stats.jsonl
+
+/** A command served text to an agent (SPEC §stats.jsonl). Token counts are chars/4 estimates. */
+export const ServeEvent = z.object({
+  schema: z.literal(SCHEMA.stats),
+  type: z.literal("serve"),
+  ts: timestamp,
+  agent: AgentId,
+  command: z.enum(["map", "read", "context"]),
+  served_tokens: count,
+  /** Estimated tokens of reading the covered files whole instead. */
+  full_read_tokens: count,
+});
+export type ServeEvent = z.infer<typeof ServeEvent>;
+
+/** One summarizer call, with the usage the provider reported. Never prompt or source text. */
+export const SummarizeEvent = z.object({
+  schema: z.literal(SCHEMA.stats),
+  type: z.literal("summarize"),
+  ts: timestamp,
+  agent: AgentId,
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  input_tokens: count,
+  output_tokens: count,
+  cost_usd: z.number().nonnegative().nullable(),
+});
+export type SummarizeEvent = z.infer<typeof SummarizeEvent>;
+
+export const StatsEvent = z.discriminatedUnion("type", [ServeEvent, SummarizeEvent]);
+export type StatsEvent = z.infer<typeof StatsEvent>;
 
 // --------------------------------------------------------------------- config
 
@@ -142,6 +194,8 @@ export const Config = z.strictObject({
       price_output_per_mtok: z.number().nonnegative().optional(),
       max_calls_per_run: z.number().int().positive().default(200),
       concurrency: z.number().int().positive().default(4),
+      /** Lines of source sent with a file's skeleton (SPEC §Algorithm 2 step 4). */
+      source_lines: z.number().int().positive().max(2000).default(200),
     })
     .superRefine((v, ctx) => {
       if (v.provider !== "off" && !v.model) {

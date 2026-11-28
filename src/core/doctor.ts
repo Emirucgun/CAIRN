@@ -1,4 +1,5 @@
-// `cairn doctor` (SPEC §CLI): check git, config, cache integrity and grammars.
+// `cairn doctor` (SPEC §CLI): check git, config, summarizer key and consent,
+// cache integrity and grammars. The key is reported by env var name only.
 // Every check reports a fix. Adapters are checked from v0.3.
 import { access, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,7 +9,9 @@ import { ConfigError, loadConfig } from "./config.js";
 import { CAIRN_DIR, cairnPaths } from "./paths.js";
 import { LANGS, loadLanguage } from "./skeleton/loader.js";
 import { snapshot } from "./snapshot.js";
-import { parseVersioned, SCHEMA, SessionCursor } from "./types.js";
+import { hasConsent } from "./summarize/consent.js";
+import { type Config, parseVersioned, SCHEMA, SessionCursor } from "./types.js";
+import { createSummarizer, type Summarizer, SummarizerError } from "../summarizers/index.js";
 
 export type CheckStatus = "ok" | "warn" | "fail" | "skip";
 
@@ -29,6 +32,8 @@ export interface DoctorReport {
 export interface DoctorOptions {
   /** Delete corrupt cache entries and unreadable session cursors. */
   fix?: boolean;
+  /** Where API keys are looked up (names only are reported, never values). */
+  env?: NodeJS.ProcessEnv;
 }
 
 export async function runDoctor(cwd: string, opts: DoctorOptions = {}): Promise<DoctorReport> {
@@ -81,6 +86,7 @@ export async function runDoctor(cwd: string, opts: DoctorOptions = {}): Promise<
     const config = await loadConfig(paths.config);
     const where = (await exists(paths.config)) ? "config.toml" : "defaults (no config.toml)";
     add({ id: "config", status: "ok", message: `${where}; summarizer: ${config.summarizer.provider}` });
+    for (const c of summarizerChecks(config.summarizer, opts.env ?? process.env, paths.consent)) add(c);
   } catch (e) {
     add({
       id: "config",
@@ -176,4 +182,52 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * The summarizer settings, whether the key's env var is set (never its value),
+ * and the consent state. Builds the summarizer locally: no network call.
+ */
+function summarizerChecks(cfg: Config["summarizer"], env: NodeJS.ProcessEnv, consentPath: string): Check[] {
+  if (cfg.provider === "off") {
+    return [
+      { id: "summarizer", status: "ok", message: "off (no AI; map, read and context work without it)" },
+      { id: "consent", status: "skip", message: "summaries are off" },
+    ];
+  }
+  let s: Summarizer | null;
+  try {
+    s = createSummarizer(cfg, env);
+  } catch (e) {
+    const missing = e instanceof SummarizerError && e.kind === "missing-key";
+    return [
+      {
+        id: "summarizer",
+        status: "warn",
+        message: `${cfg.provider}/${cfg.model ?? "?"}: ${(e as Error).message}`,
+        fix: missing ? "Export the key in your shell (it is never read from config.toml), or set provider = \"off\"" : "Fix [summarizer] in config.toml",
+      },
+      { id: "consent", status: "skip", message: "summarizer not usable yet" },
+    ];
+  }
+  if (!s) return [];
+  const keySource =
+    cfg.provider === "anthropic"
+      ? env.ANTHROPIC_API_KEY
+        ? "key from ANTHROPIC_API_KEY (set)"
+        : "token from ANTHROPIC_AUTH_TOKEN (set)"
+      : cfg.provider === "ollama"
+        ? "no key needed"
+        : env[cfg.api_key_env ?? "OPENAI_API_KEY"]
+          ? `key from ${cfg.api_key_env ?? "OPENAI_API_KEY"} (set)`
+          : "no key (local server)";
+  const checks: Check[] = [{ id: "summarizer", status: "ok", message: `${s.provider}/${s.model} at ${s.host}${s.external ? "" : " (local)"}; ${keySource}` }];
+  if (!s.external) {
+    checks.push({ id: "consent", status: "skip", message: "local server: no consent needed" });
+  } else if (hasConsent(consentPath, s)) {
+    checks.push({ id: "consent", status: "ok", message: `granted for ${s.provider} at ${s.host}` });
+  } else {
+    checks.push({ id: "consent", status: "ok", message: `not asked yet for ${s.provider} at ${s.host}; cairn summarize asks once, in a terminal` });
+  }
+  return checks;
 }
