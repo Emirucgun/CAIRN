@@ -8,11 +8,12 @@
 //   CAIRN_PERF_REPORT_ONLY=1 pnpm perf   # print results, never fail (CI macOS)
 //   CAIRN_PERF_NO_SCALE=1 pnpm perf      # judge on the unscaled limits
 //
-// Runner speed: the limits are scaled by how long building the fixture took
-// (writing the files plus git add and commit, no CAIRN code) against a
-// normal GitHub Linux runner, never below x1 and at most x2 (decided
-// 2026-11-28). Slow runners measured 2.2x slower at building it while CAIRN
-// ran 1.5-1.6x slower, so the cap keeps a real regression from hiding.
+// Runner speed (decided 2026-11-28): the limits are scaled by how slow this
+// runner is against a normal GitHub Linux runner, measured two ways with no
+// CAIRN code: disk (building the fixture: files plus git add and commit) and
+// CPU (a fixed in-process workload, median of 3). The larger ratio wins,
+// never below x1 and at most x2. Some slow runners are slow at disk, some at
+// CPU only; the cap keeps a real regression from hiding behind either.
 //
 // For profiling: CAIRN_PERF_PROFILE=<dir> writes a V8 CPU profile per run
 // and thread; CAIRN_PERF_KEEP=<dir> builds the fixture there and keeps it;
@@ -23,11 +24,15 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const FILES = Number(process.argv[2] ?? 10_000);
+// pnpm passes a literal "--" through, so skip it.
+const FILES = Number(process.argv.slice(2).find((a) => a !== "--") ?? 10_000);
 const COLD_LIMIT_MS = 5_000;
 const WARM_LIMIT_MS = 1_000;
 /** Fixture build time on a normal ubuntu-latest runner (measured 0.9-1.0 s). */
 const REFERENCE_FIXTURE_MS = 1_000;
+/** cpuWorkload() median on a normal ubuntu-latest runner (first estimate: 120 ms on a
+ * dev box that runs cold 1.38x faster than such a runner; refined from CI logs). */
+const REFERENCE_CPU_MS = 170;
 const MAX_SCALE = 2;
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../bin/cairn");
 
@@ -101,6 +106,26 @@ function generate(dir: string, n: number): void {
   }
 }
 
+/**
+ * A fixed, CPU-only job shaped like cold parsing (scanning source text,
+ * building maps and strings): no I/O, no CAIRN code, deterministic.
+ */
+function cpuWorkload(): number {
+  const t0 = performance.now();
+  let checksum = 0;
+  for (let round = 0; round < 4; round++) {
+    const counts = new Map<string, number>();
+    for (let i = 0; i < 400; i++) {
+      const text = tsFile(i) + pyFile(i);
+      for (const m of text.matchAll(/[A-Za-z_]\w*/g)) counts.set(m[0], (counts.get(m[0]) ?? 0) + 1);
+      checksum += JSON.parse(JSON.stringify(text.split("\n").map((l, n) => ({ n, l: l.trim() })))).length;
+    }
+    checksum += [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).length;
+  }
+  if (checksum === 0) throw new Error("unreachable");
+  return performance.now() - t0;
+}
+
 /** Set CAIRN_PERF_PROFILE=<dir> to write a V8 CPU profile per run. */
 const profileDir = process.env.CAIRN_PERF_PROFILE;
 
@@ -136,11 +161,14 @@ try {
   const fixtureMs = Math.round(performance.now() - g0);
   run(dir, ["init"]);
   console.log(`fixture: ${FILES} files in ${fixtureMs} ms (${dir})`);
-  const scale = process.env.CAIRN_PERF_NO_SCALE ? 1 : Math.min(MAX_SCALE, Math.max(1, fixtureMs / REFERENCE_FIXTURE_MS));
+  cpuWorkload(); // warm up the JIT; not counted
+  const cpuMs = Math.round(median([cpuWorkload(), cpuWorkload(), cpuWorkload()]));
+  const diskRatio = fixtureMs / REFERENCE_FIXTURE_MS;
+  const cpuRatio = cpuMs / REFERENCE_CPU_MS;
+  const scale = process.env.CAIRN_PERF_NO_SCALE ? 1 : Math.min(MAX_SCALE, Math.max(1, diskRatio, cpuRatio));
   console.log(
-    scale === 1
-      ? "runner speed: normal or faster, limits unscaled"
-      : `runner speed: fixture took ${(fixtureMs / REFERENCE_FIXTURE_MS).toFixed(2)}x the ${REFERENCE_FIXTURE_MS} ms reference, limits x${scale.toFixed(2)}${scale === MAX_SCALE ? " (capped)" : ""}`,
+    `runner speed: disk ${diskRatio.toFixed(2)}x (fixture ${fixtureMs} ms vs ${REFERENCE_FIXTURE_MS}), cpu ${cpuRatio.toFixed(2)}x (${cpuMs} ms vs ${REFERENCE_CPU_MS}) -> ` +
+      (scale === 1 ? "limits unscaled" : `limits x${scale.toFixed(2)}${scale === MAX_SCALE ? " (capped)" : ""}`),
   );
   if (process.env.CAIRN_PERF_FIXTURE_ONLY) process.exit(0);
 
